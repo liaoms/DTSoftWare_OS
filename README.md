@@ -24,3 +24,4 @@
 # 2020-01-20
 	主引导程序扩展
 	1、使用Fat12文件系统对软盘data.img格式化，并往data.img写入两个文件 loader.bin、test.txt，同时读取data.img中Fat12文件系统的主引导区基本信息
+	2、获取根目录文件项
