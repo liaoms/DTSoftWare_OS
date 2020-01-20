@@ -175,6 +175,79 @@ void PrintRootEntry(Fat12Header& rf, QString p)
     }
 }
 
+//获取FAT表
+QVector<ushort> ReadFat(Fat12Header& rf, QString p)
+{
+    QFile file(p);
+    int size = rf.BPB_BytsPerSec * 9; //FAT表占用的大小(9个扇区字节)
+    uchar* fat = new uchar[size];
+    QVector<ushort> ret(size * 2 / 3, 0xFFFF); //每个FAT表项占用1.5字节，FAT表个数为: 占用内存 / 1.5
+
+    if( file.open(QIODevice::ReadOnly) )
+    {
+        QDataStream in(&file);
+
+        file.seek(rf.BPB_BytsPerSec * 1); //定位到第一个扇区(FAT表起始扇区)
+
+        in.readRawData(reinterpret_cast<char*>(fat), size); //读取FAT表内容
+
+        //分配规划FAT表
+        for(int i=0, j=0; i<size; i+=3, j+=2)
+        {
+            ret[j] = static_cast<ushort>((fat[i+1] & 0x0F) << 8) | fat[i];
+            ret[j+1] = static_cast<ushort>(fat[i+2] << 4) | ((fat[i+1] >> 4) & 0x0F);
+        }
+    }
+
+    file.close();
+
+    delete[] fat;
+
+    return ret;
+}
+
+//获取文件内容
+QByteArray ReadFileContent(Fat12Header& rf, QString p, QString fn)
+{
+    QByteArray ret;
+    RootEntry re = FindRootEntry(rf, p, fn); //读取设定文件名的根目录文件项
+
+    if( re.DIR_Name[0] != '\0' )
+    {
+        QVector<ushort> vec = ReadFat(rf, p); //获取FAT表
+        QFile file(p);
+
+        if( file.open(QIODevice::ReadOnly) )
+        {
+            char buf[512] = {0};
+            QDataStream in(&file);
+            int count = 0;
+
+            ret.resize(re.DIR_FileSize);
+
+            //遍历所有簇获取文件内容
+            for(int i=0, j=re.DIR_FstClus; j<0xFF7; i+=512, j=vec[j])
+            {
+                //定位到文件数据扇区(33区)，数据区起始地址对应编号为2，所以要-2
+                file.seek(rf.BPB_BytsPerSec * (33 + j - 2));
+
+                in.readRawData(buf, sizeof(buf));
+
+                for(uint k=0; k<sizeof(buf); k++)
+                {
+                    if( count < ret.size() )
+                    {
+                        ret[i+k] = buf[k];
+                        count++;
+                    }
+                }
+            }
+        }
+        file.close();
+    }
+    return ret;
+}
+
 int main(int argc, char *argv[])
 {
     QCoreApplication a(argc, argv);
@@ -197,6 +270,13 @@ int main(int argc, char *argv[])
         qDebug() << "DIR_FstClus: " << hex << re.DIR_FstClus;
         qDebug() << "DIR_FileSize: " << hex << re.DIR_FileSize;
     }
+	qDebug() << endl;
+
+    qDebug() << "Print File Content:";
+
+    QString content = QString(ReadFileContent(f12, strImg, "TEST.TXT"));
+
+    qDebug() << content;
 
     return a.exec();
 }
