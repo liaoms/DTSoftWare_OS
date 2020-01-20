@@ -117,6 +117,44 @@ RootEntry FindRootEntry(Fat12Header& rf, QString p, int i)
     return ret; //返回读取到的根目录项
 }
 
+//获取指定文件名的根目录项
+RootEntry FindRootEntry(Fat12Header& rf, QString p, QString fn)
+{
+    RootEntry ret = {{0}};
+
+    for(int i=0; i<rf.BPB_RootEntCnt; i++)
+    {
+        RootEntry re = FindRootEntry(rf, p, i);
+
+        if( re.DIR_Name[0] != '\0' )
+        {
+            int d = fn.lastIndexOf(".");
+            QString name = QString(re.DIR_Name).trimmed();
+
+            if( d >= 0 )
+            {
+                QString n = fn.mid(0, d);
+                QString p = fn.mid(d + 1);
+
+                if( name.startsWith(n) && name.endsWith(p) )
+                {
+                    ret = re;
+                    break;
+                }
+            }
+            else
+            {
+                if( fn == name )
+                {
+                    ret = re;
+                    break;
+                }
+            }
+        }
+    }
+    return ret;
+}
+
 //打印根目录项
 void PrintRootEntry(Fat12Header& rf, QString p)
 {
@@ -148,8 +186,17 @@ int main(int argc, char *argv[])
     PrintHeader(f12, strImg);
 
     qDebug() << "*****************";
-    //读取根目录项信息
-    PrintRootEntry(f12, strImg);
+    //PrintRootEntry(f12, strImg);
+    RootEntry re = FindRootEntry(f12, strImg, "LOADER.BIN");
+    if( re.DIR_Name[0] != '\0' )
+    {
+        qDebug() << "DIR_Name: " << hex << re.DIR_Name;
+        qDebug() << "DIR_Attr: " << hex << re.DIR_Attr;
+        qDebug() << "DIR_WrtDate: " << hex << re.DIR_WrtDate;
+        qDebug() << "DIR_WrtTime: " << hex << re.DIR_WrtTime;
+        qDebug() << "DIR_FstClus: " << hex << re.DIR_FstClus;
+        qDebug() << "DIR_FileSize: " << hex << re.DIR_FileSize;
+    }
 
     return a.exec();
 }
