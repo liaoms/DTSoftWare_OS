@@ -20,3 +20,6 @@
 	调试环境搭建
 	1、软件及配置已经配置好，将bochsrc文件放到要调试的.bin的目录下即可
 	2、命令行直接输入bochs启动调试软件，使用方式与gdb类似
+
+#2020-01-20
+	1、使用Fat12文件系统对软盘data.img格式化，并往data.img写入两个文件 loader.bin、test.txt，同时读取data.img中Fat12文件系统的主引导区基本信息
