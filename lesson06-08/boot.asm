@@ -33,9 +33,18 @@ start:
     mov ds, ax
     mov es, ax
     mov sp, BaseOfStack	;栈顶地址赋值到sp寄存器
+	
+	mov ax, 34 ;读取的扇区为34号扇区,将34扇区号赋值到ax寄存器(读取扇区函数中除法用到)
+	mov cx, 1	;读取1个扇区
+	mov bx, Buf	;设置读取后存放内存位置,保存到Buf标签内存处
+	
+	call ReadSector	;读取扇区
+
+	mov bp, Buf	;设置打印消息
+	mov cx, 29	;设置打印长度
     
-    mov bp, MsgStr	;设置打印消息(es:bp指定字符串内存地址)
-    mov cx, MsgLen	;cx寄存器保存打印长度
+    ;mov bp, MsgStr	;设置打印消息(es:bp指定字符串内存地址)
+    ;mov cx, MsgLen	;cx寄存器保存打印长度
     
     call Print 		;调用Print打印函数
 
@@ -46,7 +55,56 @@ Print:
     mov bx, 0x0007
     int 0x10		;触发中断
     ret				;函数结尾标志
+	
+; no parameter
+ResetPloppy:	;重置软驱函数
+	push ax		;设置ah、dl寄存器前，先将对应的ax、dx寄存器入栈
+	push dx
+	mov ah, 0x00
+	mov dl, [BS_DrvNum]	;设置逻辑扇区号(驱动器号)
+	int 0x13
+	pop dx	;重置软驱成功后恢复ax、dx寄存器值
+	pop ax
+	ret 
+	
+;ax ->保存逻辑扇区号
+;cx ->保存读取扇区数
+; es:bx ->保存读取的内容
+ReadSector:	;读取软驱数据函数
+	push bx
+	push cx
+	push dx
+	push ax
+	call ResetPloppy
+	
+	push bx
+	push cx
+	
+	mov bl, [BPB_SecPerTrk]	;柱面扇区数赋值到bl寄存器
+	div bl 		;做除法， (被除数默认存在ax寄存器)逻辑扇区号 / 柱面扇区数
+	mov cl, ah	;获取余数(余数放在ah)
+	add cl, 1	;获取扇区号(存入cl),余数+1为起始扇区号(存入cl)
+	mov ch, al	;获取商(商放在al)
+	shr ch, 1	;商右移一位，得到柱面号(存入ch)
+	mov dh, al	
+	and dh, 1	;商&1得到磁头号，存入dh
+	mov dl, [BS_DrvNum]	;设置逻辑扇区号(驱动器号)
 
+	pop ax
+	pop bx
+	
+	mov ah, 0x02	;固定格式
+
+read:	
+	int 0x13	;触发软盘读取数据中断
+	jc read		;读错时重读
+	
+	pop ax
+	pop dx
+	pop cx
+	pop bx
+	
+	ret
 MsgStr db  "Hello, DTOS!"    	;定义打印字符串
 MsgLen equ ($-MsgStr)			;定义字符串长度($(为当前指令地址) - MsgStr(字符串起始地址))
 Buf:	
