@@ -34,19 +34,68 @@ start:
     mov es, ax
     mov sp, BaseOfStack	;栈顶地址赋值到sp寄存器
 	
-	mov ax, 34 ;读取的扇区为34号扇区,将34扇区号赋值到ax寄存器(读取扇区函数中除法用到)
-	mov cx, 1	;读取1个扇区
-	mov bx, Buf	;设置读取后存放内存位置,保存到Buf标签内存处
+;	mov ax, 34 ;读取的扇区为34号扇区,将34扇区号赋值到ax寄存器(读取扇区函数中除法用到)
+;	mov cx, 1	;读取1个扇区
+;	mov bx, Buf	;设置读取后存放内存位置,保存到Buf标签内存处
 	
-	call ReadSector	;读取扇区
+;	call ReadSector	;读取扇区
 
-	mov bp, Buf	;设置打印消息
-	mov cx, 29	;设置打印长度
+;	mov bp, Buf	;设置打印消息
+;	mov cx, 29	;设置打印长度
     
     ;mov bp, MsgStr	;设置打印消息(es:bp指定字符串内存地址)
     ;mov cx, MsgLen	;cx寄存器保存打印长度
     
+	mov si, MsgStr	;设置比较源串
+	mov di, MsgDst	;设置比较目的串
+	mov cx, MsgLen	;设置比较长度
+		
+	call MemCmp		;调用比较函数
+	
+	cmp cx, 0	;比较结果值
+	jz cmpOk 	;相等跳转到cmpOk
+	jmp last
+
+cmpOk:
+	mov bp, MsgStr
+	mov cx, MsgLen
     call Print 		;调用Print打印函数
+
+last:
+	hlt
+	jmp last
+	
+	
+;ds:si 	-> 保存比较源串
+;es:di 	-> 保存比较目标串
+;cx		-> 比较长度
+;return:
+;	(cx == 0) ? equal : noequal	
+MemCmp:	;内存比较函数
+	push ax		;相关寄存器入栈
+	push si
+	push di
+	
+compare:
+	cmp cx, 0	;判断cx是否为0
+	jz equal	;为0说明比较结果相等，跳转到equal标签处
+	mov al, [si]	;将源si位置的一个字节存入al
+	cmp al, byte [di]	;与目标di位置1个字节比较
+	jz goon	;相等跳转goon标签处，变量递增/减
+	jmp noequal	;不相等直接跳到noequal处
+
+goon:
+	inc si	;si递增1个字节
+	inc di	;di递增1个字节
+	dec cx	;cx递减1(剩余待比较字符串)
+	jmp compare	;跳转到compare继续执行
+equal:
+noequal:
+	pop di
+	pop si
+	pop ax
+	ret
+	
 
 ; es:bp --> string address
 ; cx    --> string length
@@ -107,6 +156,7 @@ read:
 	ret
 MsgStr db  "Hello, DTOS!"    	;定义打印字符串
 MsgLen equ ($-MsgStr)			;定义字符串长度($(为当前指令地址) - MsgStr(字符串起始地址))
+MsgDst db "Hello, DTOS!"
 Buf:	
     times 510-($-$$) db 0x00 ;512字节剩下的部分0填充，并以0x55 0xaa结束
     db 0x55, 0xaa
