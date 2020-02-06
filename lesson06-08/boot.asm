@@ -5,6 +5,8 @@ nop
 
 define:
     BaseOfStack equ 0x7c00 ;定义栈顶地址(定义函数时需要有栈，保存函数调用寄存器信息) ，equ方式不占内存
+	RootEntryOffset equ 19	;根目录从19扇区开始
+	RootEntryLength	equ 14	;连续读取14个扇区
 
 header:	;FAT12系统文件0扇区主引导区结构
     BS_OEMName     db "D.T.Soft"
@@ -46,15 +48,36 @@ start:
     ;mov bp, MsgStr	;设置打印消息(es:bp指定字符串内存地址)
     ;mov cx, MsgLen	;cx寄存器保存打印长度
     
-	mov si, MsgStr	;设置比较源串
-	mov di, MsgDst	;设置比较目的串
-	mov cx, MsgLen	;设置比较长度
+;	mov si, MsgStr	;设置比较源串
+;	mov di, MsgDst	;设置比较目的串
+;	mov cx, MsgLen	;设置比较长度
 		
-	call MemCmp		;调用比较函数
+;	call MemCmp		;调用比较函数
 	
-	cmp cx, 0	;比较结果值
-	jz cmpOk 	;相等跳转到cmpOk
-	jmp last
+;	cmp cx, 0	;比较结果值
+;	jz cmpOk 	;相等跳转到cmpOk
+;	jmp last
+
+	mov ax, RootEntryOffset
+	mov cx, RootEntryLength
+	mov bx, Buf
+	
+	call ReadSector
+	
+	mov si, Target
+	mov cx, TarLen
+	mov dx, 0
+	
+	call FindEntry
+	
+	cmp dx, 0
+	jz output	;查不到直接跳到output
+	jmp last	;查的到跳到last
+
+output:
+	mov bp, MsgStr
+	mov cx, MsgLen
+	call Print
 
 cmpOk:
 	mov bp, MsgStr
@@ -64,6 +87,40 @@ cmpOk:
 last:
 	hlt
 	jmp last
+	
+;es:bx 	-> 根目录便宜地址
+;ds:si 	-> 查找的目标字符串
+;cx		-> 目标字符串长度
+;return:
+;		(dx != 0) ? exit : noexit
+;		exit -> bx 寄存器为根目录目标文件的地址
+FindEntry:
+	push di
+	push bp
+	push cx
+	
+	mov dx, [BPB_RootEntCnt]	;循环查找次数(根目录文件数)
+	mov bp, SP
+	
+find:
+	cmp dx, 0	;dx为0，说明根目录文件数都遍历完,没找到
+	jz noexit
+	mov di, bx	;赋值一个根目录地址
+	mov cx, [bp]
+	call MemCmp		;根目录比较
+	cmp cx, 0
+	jz exit
+	add bx, 32		;根目录地址偏移32字节
+	dec dx			;根目录文件数减1
+	jmp find 		;循环找
+	
+exit:
+noexit:
+	pop cx
+	pop bp
+	pop di
+	
+	ret
 	
 	
 ;ds:si 	-> 保存比较源串
@@ -154,9 +211,11 @@ read:
 	pop bx
 	
 	ret
-MsgStr db  "Hello, DTOS!"    	;定义打印字符串
+MsgStr db  "No LOADER ..."    	;定义打印字符串
 MsgLen equ ($-MsgStr)			;定义字符串长度($(为当前指令地址) - MsgStr(字符串起始地址))
 MsgDst db "Hello, DTOS!"
+Target db "LOADER     "
+TarLen	equ ($-Target)
 Buf:	
     times 510-($-$$) db 0x00 ;512字节剩下的部分0填充，并以0x55 0xaa结束
     db 0x55, 0xaa
