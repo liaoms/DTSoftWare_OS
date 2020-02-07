@@ -58,26 +58,33 @@ start:
 ;	jz cmpOk 	;相等跳转到cmpOk
 ;	jmp last
 
-	mov ax, RootEntryOffset
-	mov cx, RootEntryLength
-	mov bx, Buf
+;	mov ax, RootEntryOffset
+;	mov cx, RootEntryLength
+;	mov bx, Buf
 	
-	call ReadSector
+;	call ReadSector
 	
-	mov si, Target
+;	mov si, Target
+;	mov cx, TarLen
+;	mov dx, 0
+	
+;	call FindEntry
+	
+;	cmp dx, 0
+;	jz output	;查不到直接跳到output
+;	jmp last	;查的到跳到last
+
+	mov si, Target	;将Target内存处的内容拷贝到Buf地址处
+	mov di, Buf
 	mov cx, TarLen
-	mov dx, 0
 	
-	call FindEntry
-	
-	cmp dx, 0
-	jz output	;查不到直接跳到output
-	jmp last	;查的到跳到last
+	call MemCpy
 
 output:
-	mov bp, MsgStr
+	mov bp, Buf
 	mov cx, MsgLen
 	call Print
+	jmp last
 
 cmpOk:
 	mov bp, MsgStr
@@ -87,7 +94,55 @@ cmpOk:
 last:
 	hlt
 	jmp last
+
+;	-> 内存拷贝函数
+;ds:si	-> 拷贝源地址
+;es:di	-> 拷贝目标地址
+;cx		-> 拷贝长度
+MemCpy:
+	push si
+	push di
+	push cx
+	push ax
 	
+	cmp si, di	;比较si,di大小
+	ja btoe		; si > di,跳转到btoe(从头拷贝到尾)
+	
+	add si, cx	;si <= di, si和di位置移到内存尾部
+	add di, cx
+	dec si		;指向尾部最后一个有效字节
+	dec di
+	jmp etob
+	
+btoe:	;将si一个个字节拷贝到di(从前到后)
+	cmp cx, 0
+	jz done
+	mov al, [si]
+	mov byte [di], al
+	inc si	;地址自增
+	inc di
+	dec cx
+	jmp btoe
+	
+etob:	;将si一个个字节拷贝到di(从后到前)
+	cmp cx, 0
+	jz done
+	mov al, [si]
+	mov byte [di], al
+	dec si	;地址自减
+	dec di
+	dec cx
+	jmp etob
+	
+done:
+	pop ax
+	pop cx
+	pop di
+	pop si
+	
+	ret
+	
+;	查找根目录目标文件函数
 ;es:bx 	-> 根目录便宜地址
 ;ds:si 	-> 查找的目标字符串
 ;cx		-> 目标字符串长度
@@ -157,6 +212,7 @@ noequal:
 ; es:bp --> string address
 ; cx    --> string length
 Print:
+	mov dx, 0		;打印位置置前
     mov ax, 0x1301	;设置关键寄存器
     mov bx, 0x0007
     int 0x10		;触发中断
@@ -213,7 +269,6 @@ read:
 	ret
 MsgStr db  "No LOADER ..."    	;定义打印字符串
 MsgLen equ ($-MsgStr)			;定义字符串长度($(为当前指令地址) - MsgStr(字符串起始地址))
-MsgDst db "Hello, DTOS!"
 Target db "LOADER     "
 TarLen	equ ($-Target)
 Buf:	
