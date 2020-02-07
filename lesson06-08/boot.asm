@@ -4,9 +4,13 @@ jmp short start  ;三个字节预制,jmp一个、start一个，nop占空符一�
 nop
 
 define:
-    BaseOfStack equ 0x7c00 ;定义栈顶地址(定义函数时需要有栈，保存函数调用寄存器信息) ，equ方式不占内存
+    BaseOfStack 	equ 0x7c00 ;定义栈顶地址(定义函数时需要有栈，保存函数调用寄存器信息) ，equ方式不占内存
+	BaseOfLoader	equ 0x9000
 	RootEntryOffset equ 19	;根目录从19扇区开始
 	RootEntryLength	equ 14	;连续读取14个扇区
+	EntryItemLength	equ 32
+	FatEntryOffset	equ 1
+	FatEntryLength	equ 9
 
 header:	;FAT12系统文件0扇区主引导区结构
     BS_OEMName     db "D.T.Soft"
@@ -36,11 +40,11 @@ start:
     mov es, ax
     mov sp, BaseOfStack	;栈顶地址赋值到sp寄存器
 	
-;	mov ax, 34 ;读取的扇区为34号扇区,将34扇区号赋值到ax寄存器(读取扇区函数中除法用到)
-;	mov cx, 1	;读取1个扇区
-;	mov bx, Buf	;设置读取后存放内存位置,保存到Buf标签内存处
+	mov ax, RootEntryOffset ;读取的扇区为19号扇区,将19扇区号赋值到ax寄存器(读取扇区函数中除法用到)
+	mov cx, RootEntryLength	;读取14个扇区
+	mov bx, Buf	;设置读取后存放内存位置,保存到Buf标签内存处
 	
-;	call ReadSector	;读取扇区
+	call ReadSector	;读取扇区
 
 ;	mov bp, Buf	;设置打印消息
 ;	mov cx, 29	;设置打印长度
@@ -64,21 +68,37 @@ start:
 	
 ;	call ReadSector
 	
-;	mov si, Target
-;	mov cx, TarLen
-;	mov dx, 0
-	
-;	call FindEntry
-	
-;	cmp dx, 0
-;	jz output	;查不到直接跳到output
-;	jmp last	;查的到跳到last
-
-	mov si, Target	;将Target内存处的内容拷贝到Buf地址处
-	mov di, Buf
+	mov si, Target
 	mov cx, TarLen
+	mov dx, 0
 	
-	call MemCpy
+	call FindEntry
+	
+	cmp dx, 0
+	jz output	;查不到直接跳到output
+	
+	mov si, bx		
+	mov di, EntryItem
+	mov cx, EntryItemLength
+	
+	call MemCpy		;内存拷贝
+	
+	mov ax, FatEntryLength
+	mov cx, [BPB_BytsPerSec]
+	mul cx
+	mov bx, BaseOfLoader
+	sub bx, ax
+	
+	mov ax, FatEntryOffset
+	mov cx, FatEntryLength
+	
+	call ReadSector
+	
+	mov cx, [EntryItem + 0x1A]
+	
+	call FatVec
+	
+	jmp last
 
 output:
 	mov bp, Buf
@@ -86,15 +106,66 @@ output:
 	call Print
 	jmp last
 
-cmpOk:
-	mov bp, MsgStr
-	mov cx, MsgLen
-    call Print 		;调用Print打印函数
-
 last:
 	hlt
 	jmp last
-
+	
+	
+;	-> FAT表项读取函数
+;cx	-> FAT表下标
+;bx	-> FAT表地址
+; return
+;	dx -> fat[index]
+FatVec:
+	mov ax, cx
+	mov al, 2
+	div cl	;fat表下标/2
+	
+	push ax
+	
+	mov ah, 0
+	mov cx, 3
+	mul cx
+	mov cx, ax	;fat表下标/2 * 3 的结果存入cx
+	
+	pop ax
+	
+	cmp ah, 0	;fat表下标/2的余数是否为0(判断奇数偶数)
+	jz even		;偶数跳转到even
+	jmp odd		;奇数跳转到odd
+	
+even:	;FatVec[j] = ( (Fat[i+1] & 0x0F) << 8 ) | Fat[i];
+	mov dx, cx
+	add dx, 1
+	add dx, bx
+	mov bp, dx
+	mov dl, byte [bp]
+	and dl, 0x0F
+	shl dx, 8
+	add cx, bx
+	mov bp, cx
+	or dl, byte [bp]
+	jmp return
+odd:	;FatVec[j+1] = (Fat[i+2] << 4) | ((Fat[i+1] >> 4) & 0x0F)
+	mov dx, cx
+	add dx, 2
+	add dx, bx
+	mov bp, dx
+	mov dl, byte [bp]
+	mov dh, 0
+	shl dx, 4
+	add cx, 1
+	add cx, bx
+	mov bp, cx
+	mov cl, byte [bp]
+	shr cl, 4
+	and cl, 0x0F
+	mov ch, 0
+	or dx, cx
+	
+return:
+	ret
+	
 ;	-> 内存拷贝函数
 ;ds:si	-> 拷贝源地址
 ;es:di	-> 拷贝目标地址
@@ -271,6 +342,7 @@ MsgStr db  "No LOADER ..."    	;定义打印字符串
 MsgLen equ ($-MsgStr)			;定义字符串长度($(为当前指令地址) - MsgStr(字符串起始地址))
 Target db "LOADER     "
 TarLen	equ ($-Target)
+EntryItem times EntryItemLength db 0x00
 Buf:	
     times 510-($-$$) db 0x00 ;512字节剩下的部分0填充，并以0x55 0xaa结束
     db 0x55, 0xaa
