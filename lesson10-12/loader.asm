@@ -10,6 +10,7 @@ jmp CODE16_SEGMENT	;跳转执行
 ;                                 段基址       段界限              段属性
 GDT_ENTRY    :     Descriptor        0,          0,                   0        ;全局段入口(0占位)
 CODE32_DESC  :     Descriptor        0,    Code32SegLen -1,       DA_C + DA_32 ;定义第一个32位代码段
+VIDED_DESC   :     Descriptor     0xB8000,     0x07FFF,           DA_DRWA + DA_32 ;	定义一个显示段范围0xB8000~0xBFFFF，段界限为偏移地址的最大值(0xBFFFF-0xB8000)属性为 已访问的可读写数据段 + 保护模式下32位段
 
 ; GDT end
 
@@ -21,7 +22,8 @@ GdtPtr:	;全局段描述符地址
 		
 ; GDT Selector(定义选择子)
 
-Code32Selector    equ (0x001 << 3) + SA_TIG + SA_RPL0
+Code32Selector    equ (0x001 << 3) + SA_TIG + SA_RPL0  ;第一个代码段的选择子下标为1 (0x001)
+VideoSelector     equ (0x002 << 3) + SA_TIG + SA_RPL0  ;显示段的选择子下标为2 (0x002)
 
 ; end of [section .gdt]
 
@@ -75,8 +77,15 @@ CODE16_SEGMENT:
 [section .s32]	
 [bits 32]
 CODE32_SEGMENT:  
-	mov eax, eax
-    jmp CODE32_SEGMENT
+    mov ax, VideoSelector    ;加载显示段
+	mov gs, ax
+	
+	mov edi, (80*12 + 37)*2  ;显示位置为第12行、37列，(每行显示80个字符，所以是80*12)，一个文本占2字节，所以*2
+	mov ah, 0x0c	;显示方式为黑底红字
+	mov al, 'p'		;打印一个字符p
+	mov [gs:edi], ax ;将ax放到显存段gs，偏移地址为edi的位置处
+	
+    jmp $
 
 Code32SegLen    equ $ - CODE32_SEGMENT    ;定义32位代码段段界限
 
