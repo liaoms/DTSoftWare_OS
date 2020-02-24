@@ -2,7 +2,7 @@
 
 org 0x9000	;新增loader程序，供启动程序跳转到此处执行，起始地址为0x9000
 
-jmp CODE16_SEGMENT	;跳转执行
+jmp ENTRY_SEGMENT	;跳转执行
 
 [section .gdt]	;定义一个源码级别的代码段
 ; GDT definition
@@ -13,10 +13,12 @@ CODE32_DESC  :     Descriptor        0,    Code32SegLen -1,       DA_C + DA_32 ;
 VIDED_DESC   :     Descriptor     0xB8000,     0x07FFF,           DA_DRWA + DA_32 ;	定义一个显示段范围0xB8000~0xBFFFF，段界限为偏移地址的最大值(0xBFFFF-0xB8000)属性为 已访问的可读写数据段 + 保护模式下32位段
 DATA32_DESC  :     Descriptor        0,    Data32SegLen - 1,      DA_DR + DA_32  ; 定义数据段描述符   
 STACK32_DESC :     Descriptor        0,    TopOfStack32,          DA_DRW + DA_32 ;定义32为保护模式下栈段描述符(栈空间)
+CODE16_DESC  :     Descriptor        0,        0xFFFF,            DA_C           ;16位的段，不需要DA_32
+UPDATE_DESC  :     Descriptor        0,        0xFFFF,            DA_DRW
 
 ; GDT end
 
-GdtLen  equ $ - GDT_ENTRY	;全局段的长度
+GdtLen  equ $ - GDT_ENTRY	;全局段的长度 
 
 GdtPtr:	;全局段描述符地址
         dw GdtLen - 1
@@ -24,10 +26,12 @@ GdtPtr:	;全局段描述符地址
 		
 ; GDT Selector(定义选择子)
 
-Code32Selector    equ (0x001 << 3) + SA_TIG + SA_RPL0  ;第一个代码段的选择子下标为1 (0x001)
-VideoSelector     equ (0x002 << 3) + SA_TIG + SA_RPL0  ;显示段的选择子下标为2 (0x002)
-Data32Selector    equ (0x003 << 3) + SA_TIG + SA_RPL0  ;数据段的选择子下标为3 (0x003)
-Stack32Selector   equ (0x004 << 3) + SA_TIG + SA_RPL0  ;32为保护模式下栈段的选择子下标为4 (0x004)
+Code32Selector    equ (0x0001 << 3) + SA_TIG + SA_RPL0  ;第一个代码段的选择子下标为1 (0x001)
+VideoSelector     equ (0x0002 << 3) + SA_TIG + SA_RPL0  ;显示段的选择子下标为2 (0x002)
+Data32Selector    equ (0x0003 << 3) + SA_TIG + SA_RPL0  ;数据段的选择子下标为3 (0x003)
+Stack32Selector   equ (0x0004 << 3) + SA_TIG + SA_RPL0  ;32为保护模式下栈段的选择子下标为4 (0x004)
+Code16Selector    equ (0x0005 << 3) + SA_TIG + SA_RPL0
+UpdateSelector    equ (0x0006 << 3) + SA_TIG + SA_RPL0
 
 ; end of [section .gdt]
 
@@ -47,12 +51,14 @@ Data32SegLen equ $ - DATA32_SEGMENT  ;数据段长度
 ;实模式的代码段定义
 [section .s16]
 [bits 16]	;16位模式
-CODE16_SEGMENT:
+ENTRY_SEGMENT:
     mov ax, cs
 	mov ds, ax
 	mov es, ax
 	mov ss, ax
 	mov sp, TopOfStack16
+	
+	mov [BACK_TO_REAL_MODE + 3], ax
 
 	;初始化32位的代码段的段基地址
 	;mov eax, 0	;eax寄存器为ax寄存器的延伸，有32位
@@ -75,8 +81,13 @@ CODE16_SEGMENT:
 	call InitDescItem
 	
 	;32位保护模式栈段初始化
-	mov esi, STACK23_SEGMENT
+	mov esi, STACK32_SEGMENT
 	mov edi, STACK32_DESC
+	call InitDescItem
+	
+	;初始化16实模式16位代码段
+	mov esi, CODE16_SEGMENT
+	mov edi, CODE16_DESC
 	call InitDescItem
 	
 	
@@ -106,6 +117,31 @@ CODE16_SEGMENT:
 	;5-从16位模式跳转到32位模式
 	jmp dword Code32Selector : 0
 
+
+;从保护模式回到实模式
+BACK_ENTRY_SEGMENT:
+	mov ax, cs
+	mov ds, ax
+	mov es, ax
+	mov ss, ax
+	mov sp, TopOfStack16
+		
+	;关闭A20地址线
+	in al, 0x92
+	and al, 11111101b
+	out 0x92, al
+	
+	sti ;打开终端
+	
+	mov bp, DTOS  ;打印DTOS字符串
+	mov cx, 7
+	mov dx, 0
+	mov ax, 0x1301
+	mov bx, 0x0007
+	int 0x10
+	
+	jmp $
+
 ;定义段描述符初始化函数
 ; esi -> 代码段标签
 ; edi -> 段描述符标签	
@@ -124,6 +160,27 @@ InitDescItem:
 	
 	pop eax
 	ret
+	
+;定义一个实模式下16位代码段,用于从中转
+[section .s16]
+[bits 16]
+CODE16_SEGMENT:
+	mov ax, UpdateSelector ;刷新告诉缓存器(xs)
+	mov ds, ax	
+	mov es, ax
+	mov fs, ax
+	mov gs, ax
+	mov ss, ax
+	
+	mov eax, cr0   ;通知处理器进入实模式
+	and al, 11111110b
+	mov cr0, eax
+	
+BACK_TO_REAL_MODE:
+	jmp  0 : BACK_ENTRY_SEGMENT   ;段间跳转
+
+Code16SegLen equ $ - CODE16_SEGMENT
+	
 	
 ;定义32位代码段
 [section .s32]	
@@ -148,7 +205,7 @@ CODE32_SEGMENT:
 	
 	call PrintString
 	
-    jmp $
+    jmp Code16Selector : 0
 	
 	
 ;定义32位模式下的打印函数
@@ -193,10 +250,10 @@ Code32SegLen    equ $ - CODE32_SEGMENT    ;定义32位代码段段界限
 ;定义32位栈段,专用于保护模式
 [section .gs]
 [bits 32]
-STACK23_SEGMENT:
+STACK32_SEGMENT:
 	times 1024 * 4 db 0 ;定义一个4K的空间
 	
-Stack32SegLen equ $ - STACK23_SEGMENT ;栈长度
+Stack32SegLen equ $ - STACK32_SEGMENT ;栈长度
 TopOfStack32 equ Stack32SegLen - 1  ;栈顶位置
 
   
