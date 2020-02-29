@@ -9,6 +9,9 @@ DA_CR    equ    0x9A
 DA_CCO   equ    0x9C
 DA_CCOR  equ    0x9E
 
+; special Attribute
+DA_LDT   equ    0x82
+
 ; Selector Attribute
 SA_RPL0    equ    0
 SA_RPL1    equ    1

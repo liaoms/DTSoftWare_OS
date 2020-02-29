@@ -10,11 +10,12 @@ jmp ENTRY_SEGMENT	;跳转执行
 ;                                 段基址       段界限              段属性
 GDT_ENTRY    :     Descriptor        0,          0,                   0        ;全局段入口(0占位)
 CODE32_DESC  :     Descriptor        0,    Code32SegLen -1,       DA_C + DA_32 ;定义第一个32位代码段描述符
-VIDED_DESC   :     Descriptor     0xB8000,     0x07FFF,           DA_DRWA + DA_32 ;	定义一个显示段范围0xB8000~0xBFFFF，段界限为偏移地址的最大值(0xBFFFF-0xB8000)属性为 已访问的可读写数据段 + 保护模式下32位段
+VIDEO_DESC   :     Descriptor     0xB8000,     0x07FFF,           DA_DRWA + DA_32 ;	定义一个显示段范围0xB8000~0xBFFFF，段界限为偏移地址的最大值(0xBFFFF-0xB8000)属性为 已访问的可读写数据段 + 保护模式下32位段
 DATA32_DESC  :     Descriptor        0,    Data32SegLen - 1,      DA_DR + DA_32  ; 定义数据段描述符   
 STACK32_DESC :     Descriptor        0,    TopOfStack32,          DA_DRW + DA_32 ;定义32为保护模式下栈段描述符(栈空间)
 CODE16_DESC  :     Descriptor        0,        0xFFFF,            DA_C           ;16位的段，不需要DA_32
 UPDATE_DESC  :     Descriptor        0,        0xFFFF,            DA_DRW
+TASK_A_LDT_DESC :  Descriptor        0,        TaskALdtLen - 1,   DA_LDT         ;注册局部段描述符表
 
 ; GDT end
 
@@ -32,6 +33,7 @@ Data32Selector    equ (0x0003 << 3) + SA_TIG + SA_RPL0  ;数据段的选择子�
 Stack32Selector   equ (0x0004 << 3) + SA_TIG + SA_RPL0  ;32为保护模式下栈段的选择子下标为4 (0x004)
 Code16Selector    equ (0x0005 << 3) + SA_TIG + SA_RPL0
 UpdateSelector    equ (0x0006 << 3) + SA_TIG + SA_RPL0
+TaskALdtSelector  equ (0x0007 << 3) + SA_TIG + SA_RPL0  ;局部段描述符表的选择子
 
 ; end of [section .gdt]
 
@@ -90,6 +92,25 @@ ENTRY_SEGMENT:
 	mov edi, CODE16_DESC
 	call InitDescItem
 	
+	;初始化局部段描述符表
+	mov esi, TASK_A_LDT_ENTRY
+	mov edi, TASK_A_LDT_DESC
+	call InitDescItem
+	
+	;初始化局部段的代码段
+	mov esi, TASK_A_CODE32_SEGMENT
+	mov edi, TASK_A_CODE32_DESC
+	call InitDescItem
+	
+	;初始化局部段的数据段	
+	mov esi, TASK_A_DATA32_SEGMENT
+	mov edi, TASK_A_DATA32_DESC
+	call InitDescItem
+	
+	;初始化局部段的栈段
+	mov esi, TASK_A_STACK32_SEGMENT
+	mov edi, TASK_A_STACK32_DESC
+	call InitDescItem
 	
 	; 初始化GdTPtr结构体值
 	mov eax, 0
@@ -204,8 +225,12 @@ CODE32_SEGMENT:
 	mov dl, 33
 	
 	call PrintString
+
+	mov ax, TaskALdtSelector
+	lldt ax   ;加载局部段描述符表
 	
-    jmp Code16Selector : 0
+	jmp TaskACode32Selector : 0   ;跳转到局部段描述符表的代码段
+    ;jmp Code16Selector : 0
 	
 	
 ;定义32位模式下的打印函数
@@ -255,5 +280,120 @@ STACK32_SEGMENT:
 	
 Stack32SegLen equ $ - STACK32_SEGMENT ;栈长度
 TopOfStack32 equ Stack32SegLen - 1  ;栈顶位置
+
+
+;========================================
+;
+;	新建一个任务 Task A
+;
+;========================================
+
+;Task A的局部段描述符表
+[section .task-a-ldt]
+;                                          段基址            段界限                段属性
+TASK_A_LDT_ENTRY:
+TASK_A_CODE32_DESC  :      Descriptor        0,       TaskACode32SegLen -1,       DA_C + DA_32 ;局部段代码段描述符
+TASK_A_DATA32_DESC  :      Descriptor        0,       TaskAData32SegLen -1,       DA_DR + DA_32 ;局部段数据段描述符(只读)
+TASK_A_STACK32_DESC  :     Descriptor        0,       TaskAStack32SegLen -1,      DA_DRW + DA_32 ;局部段栈段描述符(可读可写)
+
+TaskALdtLen equ $ - TASK_A_LDT_ENTRY   ;局部段描述符表长度
+
+
+;Task A的局部段的选择子
+TaskACode32Selector    equ (0x0000 << 3) + SA_TIL + SA_RPL0   ;局部段选择子下边从0开始算，并且属性取SA_TIL(代表局部段描述表的选择子)
+TaskAData32Selector    equ (0x0001 << 3) + SA_TIL + SA_RPL0
+TaskAStack32Selector   equ (0x0002 << 3) + SA_TIL + SA_RPL0
+
+
+;TaskA的数据段
+[section .task-a-dat]
+[bits 32]
+TASK_A_DATA32_SEGMENT:
+	TASK_A_STRING db "This is Task A", 0
+	TASK_A_STRING_OFFSET equ TASK_A_STRING - $$
+
+TaskAData32SegLen equ $ - TASK_A_DATA32_SEGMENT
+
+;TaskA的栈段
+[section .task-a-gs]
+[bits 32]
+TASK_A_STACK32_SEGMENT:
+	times 1024 db 0  ;栈大小为1k字节
+	
+TaskAStack32SegLen equ $ - TASK_A_STACK32_SEGMENT
+TaskATopOfStack32 equ TaskAStack32SegLen - 1
+	
+
+;TaskA的代码段
+[section .task-a-s32]
+[bits 32]
+TASK_A_CODE32_SEGMENT:
+	mov ax, VideoSelector
+	mov gs, ax  ;激活显存
+	
+	;设置TaskA的栈段
+	mov ax, TaskAStack32Selector
+	mov ss, ax
+
+	;设置TaskA的栈顶指针
+	mov eax, TaskATopOfStack32
+	mov esp, eax
+	
+	;设置TaskA的数据段
+	mov ax, TaskAData32Selector
+	mov ds, ax
+	
+	;打印一个字符串
+	mov ebp, TASK_A_STRING_OFFSET  ;字符在数据段的偏移地址
+	mov bx, 0x0c 	;打印属性黑底红字
+	mov dh, 13 ;打印位置 13行33列
+	mov dl, 33
+	
+	call TaskPrintString
+
+	jmp Code16Selector : 0  ;再返回实模式
+	
+;定义32位模式下局部段的打印函数
+;ds:ebp -> 字符串地址
+;bx -> 打印属性
+;dx -> 打印位置 dh(行), dl(列)
+TaskPrintString:	
+	push ebp
+	push eax
+	push edi
+	push dx
+	push cx
+		
+task_print:
+	mov cl, [ds:ebp] ;一个个加载字符串内容
+	cmp cl, 0
+	je task_end
+	mov eax, 80  
+	mul dh  ;计算位置(行)
+	add al, dl ;打印位置(列)
+	shl eax, 1 ; * 2
+	mov edi, eax
+	mov ah, bl ;打印属性
+	mov al, cl ;打印内容
+	mov [gs:edi], ax ;放到显存中
+	inc ebp	;下一个打印字符
+	inc dl  ;下一个打印位置
+	
+	jmp task_print
+		
+task_end:
+	pop cx
+	pop dx
+	pop edi
+	pop eax
+	pop ebp
+	
+	ret
+
+TaskACode32SegLen equ $ - TASK_A_CODE32_SEGMENT
+
+
+
+
 
   

@@ -135,8 +135,8 @@ last:
 ;	dx -> fat[index]
 FatVec:
 	mov ax, cx
-	mov al, 2
-	div cl	;fat表下标/2
+	mov cl, 2   ;除数存入用cl，被除数默认是ax
+	div cl	;fat表下标/2  => ax / cl
 	
 	push ax
 	
@@ -237,20 +237,20 @@ FindEntry:
 	
 find:
 	cmp dx, 0	;dx为0，说明根目录文件数都遍历完,没找到
-	jz noexit
+	jz noexist
 	mov di, bx	;赋值一个根目录地址
 	mov cx, [bp]
 	push si
 	call MemCmp		;根目录比较
 	pop si
 	cmp cx, 0
-	jz exit
+	jz exist
 	add bx, 32		;根目录地址偏移32字节
 	dec dx			;根目录文件数减1
 	jmp find 		;循环找
 	
-exit:
-noexit:
+exist:
+noexist:
 	pop cx
 	
 	ret
@@ -293,7 +293,7 @@ Print:
     ret				;函数结尾标志
 	
 ; no parameter
-ResetPloppy:	;重置软驱函数
+ResetFloppy:	;重置软驱函数
 	mov ah, 0x00
 	mov dl, [BS_DrvNum]	;设置逻辑扇区号(驱动器号)
 	int 0x13
@@ -304,7 +304,7 @@ ResetPloppy:	;重置软驱函数
 ; es:bx ->保存读取的内容
 ReadSector:	;读取软驱数据函数
 
-	call ResetPloppy
+	call ResetFloppy
 	
 	push bx
 	push cx
