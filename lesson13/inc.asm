@@ -9,6 +9,14 @@ DA_CR    equ    0x9A
 DA_CCO   equ    0x9C
 DA_CCOR  equ    0x9E
 
+; Segment Priviege  特权级常量定义
+DA_DPL0 equ 0x00	;DPL = 0
+DA_DPL1 equ 0x20	;DPL = 1
+DA_DPL2 equ 0x40	;DPL = 2
+DA_DPL3 equ 0x60	;DPL = 3
+
+
+
 ; special Attribute
 DA_LDT   equ    0x82
 

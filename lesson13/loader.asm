@@ -9,13 +9,14 @@ jmp ENTRY_SEGMENT	;跳转执行
 ;
 ;                                 段基址       段界限              段属性
 GDT_ENTRY    :     Descriptor        0,          0,                   0        ;全局段入口(0占位)
-CODE32_DESC  :     Descriptor        0,    Code32SegLen -1,       DA_C + DA_32 ;定义第一个32位代码段描述符
+CODE32_DESC  :     Descriptor        0,    Code32SegLen -1,       DA_C + DA_32 + DA_DPL0 ;定义第一个32位代码段描述符,代码段特权级为3
 VIDEO_DESC   :     Descriptor     0xB8000,     0x07FFF,           DA_DRWA + DA_32 ;	定义一个显示段范围0xB8000~0xBFFFF，段界限为偏移地址的最大值(0xBFFFF-0xB8000)属性为 已访问的可读写数据段 + 保护模式下32位段
 DATA32_DESC  :     Descriptor        0,    Data32SegLen - 1,      DA_DR + DA_32  ; 定义数据段描述符   
 STACK32_DESC :     Descriptor        0,    TopOfStack32,          DA_DRW + DA_32 ;定义32为保护模式下栈段描述符(栈空间)
 CODE16_DESC  :     Descriptor        0,        0xFFFF,            DA_C           ;16位的段，不需要DA_32
 UPDATE_DESC  :     Descriptor        0,        0xFFFF,            DA_DRW
 TASK_A_LDT_DESC :  Descriptor        0,        TaskALdtLen - 1,   DA_LDT         ;注册局部段描述符表
+FUNCTION_DESC   :  Descriptor        0,     FunctionSegLen - 1,   DA_C + DA_32
 
 ; GDT end
 
@@ -34,6 +35,7 @@ Stack32Selector   equ (0x0004 << 3) + SA_TIG + SA_RPL0  ;32为保护模式下栈
 Code16Selector    equ (0x0005 << 3) + SA_TIG + SA_RPL0
 UpdateSelector    equ (0x0006 << 3) + SA_TIG + SA_RPL0
 TaskALdtSelector  equ (0x0007 << 3) + SA_TIG + SA_RPL0  ;局部段描述符表的选择子
+FunctionSelector  equ (0x0008 << 3) + SA_TIG + SA_RPL0  
 
 ; end of [section .gdt]
 
@@ -110,6 +112,11 @@ ENTRY_SEGMENT:
 	;初始化局部段的栈段
 	mov esi, TASK_A_STACK32_SEGMENT
 	mov edi, TASK_A_STACK32_DESC
+	call InitDescItem
+	
+	;初始化函数代码段
+	mov esi, FUNCTION_SEGMENT
+	mov edi, FUNCTION_DESC
 	call InitDescItem
 	
 	; 初始化GdTPtr结构体值
@@ -224,20 +231,35 @@ CODE32_SEGMENT:
 	mov dh, 12 ;打印位置 12行33列
 	mov dl, 33
 	
-	call PrintString
+	call FunctionSelector : PrintString ;调用选择子FunctionSelector对应代码段，偏移地址为PrintString处的函数(打印函数)
 
 	mov ax, TaskALdtSelector
 	lldt ax   ;加载局部段描述符表
 	
 	jmp TaskACode32Selector : 0   ;跳转到局部段描述符表的代码段
     ;jmp Code16Selector : 0
+
+Code32SegLen    equ $ - CODE32_SEGMENT    ;定义32位代码段段界限
+
+;定义32位栈段,专用于保护模式
+[section .gs]
+[bits 32]
+STACK32_SEGMENT:
+	times 1024 * 4 db 0 ;定义一个4K的空间
 	
-	
+Stack32SegLen equ $ - STACK32_SEGMENT ;栈长度
+TopOfStack32 equ Stack32SegLen - 1  ;栈顶位置
+
+;定义一个32位代码函数段，用于存放共有函数
+[section .fun]
+[bits 32]
+FUNCTION_SEGMENT:
+
 ;定义32位模式下的打印函数
 ;ds:ebp -> 字符串地址
 ;bx -> 打印属性
 ;dx -> 打印位置 dh(行), dl(列)
-PrintString:	
+PrintStringFun:	
 	push ebp
 	push eax
 	push edi
@@ -268,18 +290,11 @@ end:
 	pop eax
 	pop ebp
 	
-	ret
-
-Code32SegLen    equ $ - CODE32_SEGMENT    ;定义32位代码段段界限
-
-;定义32位栈段,专用于保护模式
-[section .gs]
-[bits 32]
-STACK32_SEGMENT:
-	times 1024 * 4 db 0 ;定义一个4K的空间
+	retf
 	
-Stack32SegLen equ $ - STACK32_SEGMENT ;栈长度
-TopOfStack32 equ Stack32SegLen - 1  ;栈顶位置
+PrintString equ PrintStringFun - $$	 ;打印函数在代码段偏移地址
+
+FunctionSegLen equ $ - FUNCTION_SEGMENT   
 
 
 ;========================================
@@ -349,46 +364,9 @@ TASK_A_CODE32_SEGMENT:
 	mov dh, 13 ;打印位置 13行33列
 	mov dl, 33
 	
-	call TaskPrintString
+	call FunctionSelector : PrintString  ;调用选择子FunctionSelector对应代码段，偏移地址为PrintString处的函数(打印函数)
 
 	jmp Code16Selector : 0  ;再返回实模式
-	
-;定义32位模式下局部段的打印函数
-;ds:ebp -> 字符串地址
-;bx -> 打印属性
-;dx -> 打印位置 dh(行), dl(列)
-TaskPrintString:	
-	push ebp
-	push eax
-	push edi
-	push dx
-	push cx
-		
-task_print:
-	mov cl, [ds:ebp] ;一个个加载字符串内容
-	cmp cl, 0
-	je task_end
-	mov eax, 80  
-	mul dh  ;计算位置(行)
-	add al, dl ;打印位置(列)
-	shl eax, 1 ; * 2
-	mov edi, eax
-	mov ah, bl ;打印属性
-	mov al, cl ;打印内容
-	mov [gs:edi], ax ;放到显存中
-	inc ebp	;下一个打印字符
-	inc dl  ;下一个打印位置
-	
-	jmp task_print
-		
-task_end:
-	pop cx
-	pop dx
-	pop edi
-	pop eax
-	pop ebp
-	
-	ret
 
 TaskACode32SegLen equ $ - TASK_A_CODE32_SEGMENT
 
