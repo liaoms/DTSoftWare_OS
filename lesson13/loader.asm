@@ -9,10 +9,10 @@ jmp ENTRY_SEGMENT	;跳转执行
 ;
 ;                                 段基址       段界限              段属性
 GDT_ENTRY    :     Descriptor        0,          0,                   0        ;全局段入口(0占位)
-CODE32_DESC  :     Descriptor        0,    Code32SegLen -1,       DA_C + DA_32 + DA_DPL0 ;定义第一个32位代码段描述符,代码段特权级为3
-VIDEO_DESC   :     Descriptor     0xB8000,     0x07FFF,           DA_DRWA + DA_32 ;	定义一个显示段范围0xB8000~0xBFFFF，段界限为偏移地址的最大值(0xBFFFF-0xB8000)属性为 已访问的可读写数据段 + 保护模式下32位段
-DATA32_DESC  :     Descriptor        0,    Data32SegLen - 1,      DA_DR + DA_32  ; 定义数据段描述符   
-STACK32_DESC :     Descriptor        0,    TopOfStack32,          DA_DRW + DA_32 ;定义32为保护模式下栈段描述符(栈空间)
+CODE32_DESC  :     Descriptor        0,    Code32SegLen -1,       DA_C + DA_32 + DA_DPL3 ;定义第一个32位代码段描述符,代码段特权级为地特权级3，默认为高特权级0
+VIDEO_DESC   :     Descriptor     0xB8000,     0x07FFF,           DA_DRWA + DA_32  + DA_DPL3 ;	定义一个显示段范围0xB8000~0xBFFFF，段界限为偏移地址的最大值(0xBFFFF-0xB8000)属性为 已访问的可读写数据段 + 保护模式下32位段
+DATA32_DESC  :     Descriptor        0,    Data32SegLen - 1,      DA_DR + DA_32  + DA_DPL3  ; 定义数据段描述符   
+STACK32_DESC :     Descriptor        0,    TopOfStack32,          DA_DRW + DA_32  + DA_DPL3 ;定义32为保护模式下栈段描述符(栈空间)
 CODE16_DESC  :     Descriptor        0,        0xFFFF,            DA_C           ;16位的段，不需要DA_32
 UPDATE_DESC  :     Descriptor        0,        0xFFFF,            DA_DRW
 TASK_A_LDT_DESC :  Descriptor        0,        TaskALdtLen - 1,   DA_LDT         ;注册局部段描述符表
@@ -32,10 +32,10 @@ GdtPtr:	;全局段描述符地址
 		
 ; GDT Selector(定义选择子)
 
-Code32Selector    equ (0x0001 << 3) + SA_TIG + SA_RPL0  ;第一个代码段的选择子下标为1 (0x001)
-VideoSelector     equ (0x0002 << 3) + SA_TIG + SA_RPL0  ;显示段的选择子下标为2 (0x002)
-Data32Selector    equ (0x0003 << 3) + SA_TIG + SA_RPL0  ;数据段的选择子下标为3 (0x003)
-Stack32Selector   equ (0x0004 << 3) + SA_TIG + SA_RPL0  ;32为保护模式下栈段的选择子下标为4 (0x004)
+Code32Selector    equ (0x0001 << 3) + SA_TIG + SA_RPL3  ;第一个代码段的选择子下标为1 (0x001), 跟随特权级改动为RPL3
+VideoSelector     equ (0x0002 << 3) + SA_TIG + SA_RPL3  ;显示段的选择子下标为2 (0x002)
+Data32Selector    equ (0x0003 << 3) + SA_TIG + SA_RPL3  ;数据段的选择子下标为3 (0x003)
+Stack32Selector   equ (0x0004 << 3) + SA_TIG + SA_RPL3  ;32为保护模式下栈段的选择子下标为4 (0x004)
 Code16Selector    equ (0x0005 << 3) + SA_TIG + SA_RPL0
 UpdateSelector    equ (0x0006 << 3) + SA_TIG + SA_RPL0
 TaskALdtSelector  equ (0x0007 << 3) + SA_TIG + SA_RPL0  ;局部段描述符表的选择子
@@ -148,7 +148,16 @@ ENTRY_SEGMENT:
 	mov cr0, eax
 	
 	;5-从16位模式跳转到32位模式
-	jmp dword Code32Selector : 0
+	;jmp dword Code32Selector : 0
+	
+	;高特权级跳转到低特权级步骤
+	;跳到第特权级选择子Code32Selector对应的代码段处执行,即CODE32_SEGMENT代码段处
+	push Stack32Selector  	;目标栈段选择子
+	push TopOfStack32		;目标栈段栈顶指针位置
+	push Code32Selector		;目标代码段选择子
+	push 0					;目标代码段偏移地址
+	
+	retf					;跳转指令，高特权级跳到低特权级 (0 -> 3)  
 
 
 ;从保护模式回到实模式
@@ -237,13 +246,49 @@ CODE32_SEGMENT:
 	mov dl, 33
 	
 	;call FunctionSelector : PrintString ;调用选择子FunctionSelector对应代码段，偏移地址为PrintString处的函数(打印函数)
-	call FuncPrintSelector : 0   ;调用门的方式进行函数调用，
+	;;call FuncPrintSelector : 0   ;调用门的方式进行函数调用，
 
-	mov ax, TaskALdtSelector
-	lldt ax   ;加载局部段描述符表
+	;;mov ax, TaskALdtSelector
+	;;lldt ax   ;加载局部段描述符表
 	
-	jmp TaskACode32Selector : 0   ;跳转到局部段描述符表的代码段
+	;;jmp TaskACode32Selector : 0   ;跳转到局部段描述符表的代码段
     ;jmp Code16Selector : 0
+	
+	call PrintStringCode32  ;调用被代码段内的打印函数PrintStringCode32
+	jmp $
+	
+PrintStringCode32:	
+	push ebp
+	push eax
+	push edi
+	push dx
+	push cx
+		
+print:
+	mov cl, [ds:ebp] ;一个个加载字符串内容
+	cmp cl, 0
+	je end
+	mov eax, 80  
+	mul dh  ;计算位置(行)
+	add al, dl ;打印位置(列)
+	shl eax, 1 ; * 2
+	mov edi, eax
+	mov ah, bl ;打印属性
+	mov al, cl ;打印内容
+	mov [gs:edi], ax ;放到显存中
+	inc ebp	;下一个打印字符
+	inc dl  ;下一个打印位置
+	
+	jmp print
+		
+end:
+	pop cx
+	pop dx
+	pop edi
+	pop eax
+	pop ebp
+	
+	ret
 
 Code32SegLen    equ $ - CODE32_SEGMENT    ;定义32位代码段段界限
 
@@ -272,10 +317,10 @@ PrintStringFun:
 	push dx
 	push cx
 		
-print:
+printfun:
 	mov cl, [ds:ebp] ;一个个加载字符串内容
 	cmp cl, 0
-	je end
+	je endfun
 	mov eax, 80  
 	mul dh  ;计算位置(行)
 	add al, dl ;打印位置(列)
@@ -287,9 +332,9 @@ print:
 	inc ebp	;下一个打印字符
 	inc dl  ;下一个打印位置
 	
-	jmp print
+	jmp printfun
 		
-end:
+endfun:
 	pop cx
 	pop dx
 	pop edi
