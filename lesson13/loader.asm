@@ -16,7 +16,11 @@ STACK32_DESC :     Descriptor        0,    TopOfStack32,          DA_DRW + DA_32
 CODE16_DESC  :     Descriptor        0,        0xFFFF,            DA_C           ;16位的段，不需要DA_32
 UPDATE_DESC  :     Descriptor        0,        0xFFFF,            DA_DRW
 TASK_A_LDT_DESC :  Descriptor        0,        TaskALdtLen - 1,   DA_LDT         ;注册局部段描述符表
-FUNCTION_DESC   :  Descriptor        0,     FunctionSegLen - 1,   DA_C + DA_32
+FUNCTION_DESC   :  Descriptor        0,     FunctionSegLen - 1,   DA_C + DA_32   
+
+; Gate definition  门描述符
+; Call Gate                    选择子             偏移       参数个数         属性
+FUNC_PRINT_DESC   Gate    FunctionSelector,   PrintString,      0,         DA_386CGate   ;注册门描述符 
 
 ; GDT end
 
@@ -36,6 +40,7 @@ Code16Selector    equ (0x0005 << 3) + SA_TIG + SA_RPL0
 UpdateSelector    equ (0x0006 << 3) + SA_TIG + SA_RPL0
 TaskALdtSelector  equ (0x0007 << 3) + SA_TIG + SA_RPL0  ;局部段描述符表的选择子
 FunctionSelector  equ (0x0008 << 3) + SA_TIG + SA_RPL0  
+FuncPrintSelector equ (0x0009 << 3) + SA_TIG + SA_RPL0  ;门描述符的选择子，FuncPrintSelector选择子可理解为函数入口
 
 ; end of [section .gdt]
 
@@ -231,7 +236,8 @@ CODE32_SEGMENT:
 	mov dh, 12 ;打印位置 12行33列
 	mov dl, 33
 	
-	call FunctionSelector : PrintString ;调用选择子FunctionSelector对应代码段，偏移地址为PrintString处的函数(打印函数)
+	;call FunctionSelector : PrintString ;调用选择子FunctionSelector对应代码段，偏移地址为PrintString处的函数(打印函数)
+	call FuncPrintSelector : 0   ;调用门的方式进行函数调用，
 
 	mov ax, TaskALdtSelector
 	lldt ax   ;加载局部段描述符表

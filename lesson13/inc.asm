@@ -18,7 +18,12 @@ DA_DPL3 equ 0x60	;DPL = 3
 
 
 ; special Attribute
-DA_LDT   equ    0x82
+DA_LDT   	 equ    0x82
+DA_TaskGate  equ    0x85	; 任务门类型值
+DA_386TSS    equ	0x89	; 可用 386 任务状态段类型值
+DA_386CGate  equ	0x8C	; 386 调用门类型值
+DA_386IGate  equ	0x8E	; 386 中断门类型值
+DA_386TGate  equ	0x8F	; 386 陷阱门类型值
 
 ; Selector Attribute
 SA_RPL0    equ    0
@@ -42,3 +47,15 @@ SA_TIL    equ    4
     db    (%1 >> 24) & 0xFF                   ; 段基址3
 %endmacro                                     ; 共 8 字节
 
+; 门
+; usage: Gate Selector, Offset, DCount, Attr
+;        Selector:  dw
+;        Offset:    dd
+;        DCount:    db
+;        Attr:      db
+%macro Gate 4
+    dw    (%2 & 0xFFFF)                      ; 偏移地址1
+    dw    %1                                 ; 选择子
+    dw    (%3 & 0x1F) | ((%4 << 8) & 0xFF00) ; 属性
+    dw    ((%2 >> 16) & 0xFFFF)              ; 偏移地址2
+%endmacro 
