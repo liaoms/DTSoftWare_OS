@@ -14,8 +14,10 @@ VIDEO_DESC   :     Descriptor     0xB8000,     0x07FFF,           DA_DRWA + DA_3
 DATA32_DESC  :     Descriptor        0,    Data32SegLen - 1,      DA_DR + DA_32  + DA_DPL2  ; 定义数据段描述符   
 STACK32_DESC :     Descriptor        0,    TopOfStack32,          DA_DRW + DA_32  + DA_DPL1 ;定义32为保护模式下栈段描述符(栈空间)
 FUNCTION_DESC   :  Descriptor        0,     FunctionSegLen - 1,   DA_C + DA_32 + DA_DPL1
+NEW_DESC     :  Descriptor           0,     NewSegLen - 1,   	  DA_CCO + DA_32 + DA_DPL0   ;DA_CCO表示一致性代码段
 
 ;非一致性代码段只能平级跳转 即 CPL = DPL,如 CODE32_DESC 跳转到FUNCTION_DESC，特权级必须相等，描述符的特权级，一般与选择子的特权级保持一致
+;一致性代码段跳到一致性代码段，需要CPL >= DPL  ,如CODE32_DESC 跳转到NEW_DESC，CODE32_DESC 特权级必须 <= NEW_DESC的特权级
 
 
 ; GDT end
@@ -33,6 +35,7 @@ VideoSelector     equ (0x0002 << 3) + SA_TIG + SA_RPL2  ;显示段的选择子�
 Data32Selector    equ (0x0003 << 3) + SA_TIG + SA_RPL2  ;数据段的选择子下标为3 (0x003)
 Stack32Selector   equ (0x0004 << 3) + SA_TIG + SA_RPL1  ;32为保护模式下栈段的选择子下标为4 (0x004)
 FunctionSelector  equ (0x0005 << 3) + SA_TIG + SA_RPL1  
+NewSelector       equ (0x0006 << 3) + SA_TIG + SA_RPL0
 
 ; end of [section .gdt]
 
@@ -77,6 +80,11 @@ ENTRY_SEGMENT:
 	;初始化函数代码段
 	mov esi, FUNCTION_SEGMENT
 	mov edi, FUNCTION_DESC
+	call InitDescItem
+	
+	;初始化一致性代码段
+	mov esi, NEW_SEGMENT
+	mov edi, NEW_DESC
 	call InitDescItem
 	
 	; 初始化GdTPtr结构体值
@@ -157,7 +165,7 @@ CODE32_SEGMENT:
 	
 	call FunctionSelector : PrintString ;调用选择子FunctionSelector对应代码段，偏移地址为PrintString处的函数(打印函数)
 
-	jmp $
+	jmp NewSelector : 0   ;跳转到一致性代码段(从非一致代码段跳转到一致性代码段, CPL >= DPL,必须是地特权级向高特权级跳转)
 
 Code32SegLen    equ $ - CODE32_SEGMENT    ;定义32位代码段段界限
 
@@ -169,6 +177,26 @@ STACK32_SEGMENT:
 	
 Stack32SegLen equ $ - STACK32_SEGMENT ;栈长度
 TopOfStack32 equ Stack32SegLen - 1  ;栈顶位置
+
+;定义一个一致性代码段,描述符特权级定义为0
+[section .new]
+[bits 32]
+NEW_SEGMENT:
+	
+	;设置参数并调用打印函数
+	mov ax, Data32Selector ;数据段选择子
+	mov ds, ax
+	mov ebp, DTOS_OFFSET  ;字符在数据段的偏移地址
+	mov bx, 0x0c 	;打印属性黑底红字
+	mov dh, 13 ;打印位置 12行33列
+	mov dl, 33
+	
+	;从非一致代码段跳转到此处一致性代码段，但当前特权级保持不变，依旧是非一致性代码段的特权级(地特权级)，所以在此处可以直接调用低特权级的打印代码段函数
+	call FunctionSelector : PrintString ;调用选择子FunctionSelector对应代码段，偏移地址为PrintString处的函数(打印函数)
+	jmp $
+	
+NewSegLen equ $ - NEW_SEGMENT
+
 
 ;定义一个32位代码函数段，用于存放共有函数
 [section .fun]
