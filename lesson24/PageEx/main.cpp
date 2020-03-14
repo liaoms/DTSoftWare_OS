@@ -2,6 +2,7 @@
 #include <iostream>
 #include <QList>
 #include <ctime>
+#include <QQueue>
 
 using namespace  std;
 
@@ -134,6 +135,8 @@ FrameItem FrameTable[FRAME_NUM];  //页框表
 
 QList<PCB*> TaskTable;  //任务表
 
+QQueue<int> FrameQueue; //保存被任务占用的页框的队列
+
 void PrintLog(QString string)
 {
     cout << string.toStdString() << endl;
@@ -163,6 +166,8 @@ int ReQuestPage(int pid, int page);
 int Random();
 int SwapPage();
 int ClearFrameItem(PCB& pcb);   //释放页框
+int ClearFrameItem(int frame);   //释放单个页框
+int FIFO();
 
 //获取页框
 int GetFrameItem()
@@ -248,6 +253,7 @@ int ReQuestPage(int pid, int page)
     FrameTable[frame].pid = pid;
     FrameTable[frame].pnum = frame;
 
+    FrameQueue.enqueue(frame);  //请求到一个页框，便入队列
     return frame;
 
 }
@@ -257,33 +263,18 @@ int Random()
 {
     int obj = qrand() % FRAME_NUM;  //随机决定一个页框里要置换出去的页
 
-    PrintLog("Random select a frame to swap page content out: frame" + QString::number(obj));
-    PrintLog("Write the selected page content back to disk");
-
-    FrameTable[obj].pid = FP_NONE;   //对应页复位
-    FrameTable[obj].pnum = FP_NONE;
-
-    for(int i=0, f=0; !f && i<TaskTable.count(); i++)  //将任务中使用到该被置换出去的页框，对应的页清空
-    {
-        PageTable& pt = TaskTable[i]->getPageTable();
-        for(int j=0; j<pt.length(); j++)
-        {
-            if(pt[j] == obj)
-            {
-                pt[j] = FP_NONE;
-                f = 1;
-                break;
-            }
-        }
-    }
+    ClearFrameItem(obj);    //释放随机获取的页框
 
     return obj;
 }
 //页交换
 int SwapPage()
 {
-    return Random();
+    //return Random();
+    return FIFO();
 }
+
+
 
 //释放任务
 int ClearFrameItem(PCB& pcb)
@@ -299,6 +290,38 @@ int ClearFrameItem(PCB& pcb)
         }
     }
     return 0;
+}
+
+int ClearFrameItem(int frame)   //释放单个页框
+{
+    PrintLog("Random select a frame to swap page content out: frame" + QString::number(frame));
+    PrintLog("Write the selected page content back to disk");
+
+    FrameTable[frame].pid = FP_NONE;   //对应页复位
+    FrameTable[frame].pnum = FP_NONE;
+
+    for(int i=0, f=0; !f && i<TaskTable.count(); i++)  //将任务中使用到该被置换出去的页框，对应的页清空
+    {
+        PageTable& pt = TaskTable[i]->getPageTable();
+        for(int j=0; j<pt.length(); j++)
+        {
+            if(pt[j] == frame)
+            {
+                pt[j] = FP_NONE;
+                f = 1;
+                break;
+            }
+        }
+    }
+}
+
+int FIFO()
+{
+    int frame = FrameQueue.dequeue();  //FIFO页面交换算法，交换队列头的页框
+
+    ClearFrameItem(frame);  //释放队列头的页框
+
+    return frame;
 }
 
 int main(int argc, char *argv[])
