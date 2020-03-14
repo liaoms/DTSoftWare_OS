@@ -6,7 +6,9 @@
 
 using namespace  std;
 
-#define PAGE_UNM (0xFF + 1)   //一个任务的页面数
+#define PAGE_DIR_NUM (0xF + 1)  //页目录数大小
+#define PAGE_SUB_NUM (0xF +1)	//子页表大小
+#define PAGE_UNM (PAGE_DIR_NUM * PAGE_SUB_NUM )   //一个任务的页面数
 #define FRAME_NUM (0x04)      //系统的页框数
 #define FP_NONE  -1
 
@@ -29,14 +31,15 @@ struct FrameItem
 //页表类
 class PageTable
 {
-    int m_pt[PAGE_UNM]; //一个任务有有256个页表  m_pt下标模拟应用程序的逻辑页号，保存到额内容模拟计算机的物理页号，即页框号
+	//指针数组，元素为指向子页表的地址
+    int* m_pt[PAGE_DIR_NUM]; //页表采用二级页目录表示  保存到额内容模拟计算机的物理页号，即页框号
 
 public:
     PageTable()
     {
-        for(int i=0; i<PAGE_UNM; i++)  //任务页表初始化
+        for(int i=0; i<PAGE_DIR_NUM; i++)  //任务页目录初始化
         {
-            m_pt[i] = FP_NONE;
+            m_pt[i] = NULL;
         }
     }
 
@@ -44,12 +47,27 @@ public:
     {
         if( (i >= 0) && (i < length()) )
         {
-            return m_pt[i];
+			int dir = ((i & 0xF0) >> 4);
+			int sub = (i & 0x0F);
+			
+			if(m_pt[dir] == NULL)
+			{
+				//页目录对应的子页表没有，则申请一个页目录下的子页表,节省空间
+				m_pt[dir] = new int(PAGE_SUB_NUM);
+				
+				for(int j=0; j<PAGE_SUB_NUM; j++)
+				{
+					m_pt[dir][j] = FP_NONE;
+				}
+			}
+			
+			
+            return m_pt[dir][sub];
         }
         else
         {
             QCoreApplication::exit(-1);
-            return m_pt[0] ; //消除编译警告
+            return m_pt[0][0] ; //消除编译警告
         }
     }
 
@@ -57,6 +75,14 @@ public:
     {
         return PAGE_UNM;
     }
+	
+	~PageTable()
+	{
+		for(int i=0; i<PAGE_DIR_NUM; i++)
+		{
+			delete[] m_pt[i];
+		}
+	}
 };
 
 //任务结构
