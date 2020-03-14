@@ -46,6 +46,7 @@ public:
         else
         {
             QCoreApplication::exit(-1);
+            return m_pt[0] ; //消除编译警告
         }
     }
 
@@ -161,6 +162,7 @@ int AccessPage(PCB& pcb);
 int ReQuestPage(int pid, int page);
 int Random();
 int SwapPage();
+int ClearFrameItem(PCB& pcb);   //释放页框
 
 //获取页框
 int GetFrameItem()
@@ -197,7 +199,7 @@ int AccessPage(PCB& pcb)
         else
         {
             PrintLog("Target page is NOT Found, need to request page ...");  //要访问的页表不在页框中，需要请求页框得到一个页表
-            pageTable[page] = ReQuestPage(pid, page);
+            pageTable[page] = ReQuestPage(pid, page);  //获取一个页框，映射到任务的页表里
 
             if(pageTable[page] != FP_NONE)
             {
@@ -283,6 +285,22 @@ int SwapPage()
     return Random();
 }
 
+//释放任务
+int ClearFrameItem(PCB& pcb)
+{
+    int pid = pcb.getPid();
+
+    for(int i=0; i<FRAME_NUM; i++)
+    {
+        if(FrameTable[i].pid == pid) //释放目标任务占用的页框
+        {
+            FrameTable[i].pnum = FP_NONE;
+            FrameTable[i].pid = FP_NONE;
+        }
+    }
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
     QCoreApplication a(argc, argv);
@@ -302,12 +320,30 @@ int main(int argc, char *argv[])
 
     while(true)
     {
-        if(TaskTable[index]->running())  //两个任务执行过程，回车观察页的使用及置换情况
+        if(TaskTable.count() > 0)
         {
-            AccessPage(*TaskTable[index]);
+            if(TaskTable[index]->running())  //两个任务执行过程，回车观察页的使用及置换情况
+            {
+                AccessPage(*TaskTable[index]);
+            }
+            else //对应任务已经结束，释放页框及任务空间
+            {
+                PCB* pcb = TaskTable[index];
+
+                PrintLog("Task" + QString::number(pcb->getPid()) + " is Finished");
+
+                TaskTable.removeAt(index);  //任务表中移除该任务
+                ClearFrameItem(*pcb);  //回收业务占用的内框
+
+                delete pcb; //释放业务占用的内存
+            }
         }
 
-        index = (index + 1) % TaskTable.count();
+
+        if(TaskTable.count() > 0)
+        {
+            index = (index + 1) % TaskTable.count();
+        }
 
         cin.get();
     }
