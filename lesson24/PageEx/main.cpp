@@ -16,11 +16,13 @@ struct FrameItem
 {
     int pid;    //使用该页框的任务ID
     int pnum;   //该页框保存的页表序号
+    int tickId;    //记录页框访问次数
 
     FrameItem()
     {
         pid = FP_NONE;
         pnum = FP_NONE;
+        tickId = 0;
     }
 };
 
@@ -168,6 +170,7 @@ int SwapPage();
 int ClearFrameItem(PCB& pcb);   //释放页框
 int ClearFrameItem(int frame);   //释放单个页框
 int FIFO();
+int LRU();  //LUR算法
 
 //获取页框
 int GetFrameItem()
@@ -252,6 +255,7 @@ int ReQuestPage(int pid, int page)
     PrintLog("Load content from disk to frame" + QString::number(frame));
     FrameTable[frame].pid = pid;
     FrameTable[frame].pnum = frame;
+    FrameTable[frame].tickId = 0xFF;    //请求到一个页框，给访问次数赋值255
 
     FrameQueue.enqueue(frame);  //请求到一个页框，便入队列
     return frame;
@@ -271,7 +275,8 @@ int Random()
 int SwapPage()
 {
     //return Random();
-    return FIFO();
+    //return FIFO();
+    return LRU();
 }
 
 
@@ -324,6 +329,28 @@ int FIFO()
     return frame;
 }
 
+int LRU()
+{
+    int tickCmp = FrameTable[0].tickId;
+    int ret =0;
+    QString s = "";
+    for(int i=0; i<FRAME_NUM; i++) //获取访问次数最少的页框
+    {
+        if( tickCmp > FrameTable[i].tickId )
+        {
+            tickCmp = FrameTable[i].tickId;
+            ret = i;
+        }
+
+        s += "Frame" + QString::number(i) + " tickId = " + QString::number(FrameTable[i].tickId) + " : ";
+    }
+    PrintLog("Frame tickId List is : " + s);
+
+    ClearFrameItem(ret); //清除访问次数最少的页框
+
+    return ret;
+}
+
 int main(int argc, char *argv[])
 {
     QCoreApplication a(argc, argv);
@@ -343,6 +370,11 @@ int main(int argc, char *argv[])
 
     while(true)
     {
+        for(int i=0; i<FRAME_NUM; i++) //模拟系统中断，每次中断，tickId计数减一
+        {
+            FrameTable[i].tickId--;
+        }
+
         if(TaskTable.count() > 0)
         {
             if(TaskTable[index]->running())  //两个任务执行过程，回车观察页的使用及置换情况
