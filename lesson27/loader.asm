@@ -183,7 +183,19 @@ lable:  ;循环累加验证
 	add ax, cx
 	loop lable   ; loop指令： cx == 0 ? 跳到jmp $执行 ：cx自减1，跳到lable执行下次累加 
 	
-	jmp $
+	;stosb/stosw/stosd 指令验证
+	
+	mov ax, Data32Selector
+	mov es, ax   
+	mov edi, 0   ;目的地址为数据段，偏移地址为0的地方
+	 
+	mov eax, 0xFF  ; 将0xFF 拷贝到 [es:edi]指定的内存处,此处为数据段
+	
+	cld  ;拷贝完成后，使edi往高地址处增加 
+	
+	stosd  ;开始拷贝   
+	
+	jmp $   ;断点可以打到此处，执行到此处，可以查看内存中数据段的值:  x /4bx ds:0    (表示以16进制查看4字节内容，查看地址为ds:0  即数据段偏移地址为0的地方)
 	
 PrintString:	
 	push ebp
