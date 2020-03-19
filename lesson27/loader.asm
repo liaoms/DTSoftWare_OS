@@ -1,8 +1,10 @@
 %include "inc.asm"
 
 
-PageDirBase	equ 0x200000   	;定义页目录基地址
-PageTblBase	equ 0x201000	;定义子页表基地址
+PageDirBase0	equ 0x200000   	;定义页目录基地址
+PageTblBase0	equ 0x201000	;定义子页表基地址
+PageDirBase1	equ 0x300000   	;定义页目录基地址
+PageTblBase1	equ 0x301000	;定义子页表基地址
 
 org 0x9000	;新增loader程序，供启动程序跳转到此处执行，起始地址为0x9000
 
@@ -17,9 +19,10 @@ CODE32_DESC  :     Descriptor        0,    			Code32SegLen -1,       DA_C + DA_3
 VIDEO_DESC   :     Descriptor     0xB8000, 			    0x07FFF,           DA_DRWA + DA_32	;定义一个显示段范围0xB8000~0xBFFFF，段界限为偏移地址的最大值(0xBFFFF-0xB8000)属性为 已访问的可读写数据段 + 保护模式下32位段
 DATA32_DESC  :     Descriptor        0,    			Data32SegLen - 1,      DA_DRW + DA_32	;定义数据段描述符   
 STACK32_DESC :     Descriptor        0,    			TopOfStack32,          DA_DRW + DA_32	;定义32为保护模式下栈段描述符(栈空间) 
-PAGE_DIR_DESC :    Descriptor     PageDirBase,           4095,             DA_DRW + DA_32   ;页目录基地址描述符,页目录占4K(总共有1024个页目录，每个页目录占4字节)字节，即最大偏移地址为4095
-PAGE_TBL_DESC :    Descriptor     PageTblBase,           1023,             DA_DRW + DA_32 + DA_LIMIT_4K	;有1024个子页表，每个页表占4K字节(每个子页表有1024页表项，每个页表项占4字节)，所以设定最大偏移地址为1023，偏移单位为4K(DA_LIMIT_4K),			
-
+PAGE_DIR_DESC0 :    Descriptor    PageDirBase0,           4095,             DA_DRW + DA_32   ;页目录基地址描述符,页目录占4K(总共有1024个页目录，每个页目录占4字节)字节，即最大偏移地址为4095
+PAGE_TBL_DESC0 :    Descriptor    PageTblBase0,           1023,             DA_DRW + DA_32 + DA_LIMIT_4K	;有1024个子页表，每个页表占4K字节(每个子页表有1024页表项，每个页表项占4字节)，所以设定最大偏移地址为1023，偏移单位为4K(DA_LIMIT_4K),			
+PAGE_DIR_DESC1 :    Descriptor    PageDirBase1,           4095,             DA_DRW + DA_32   ;页目录基地址描述符,页目录占4K(总共有1024个页目录，每个页目录占4字节)字节，即最大偏移地址为4095
+PAGE_TBL_DESC1 :    Descriptor    PageTblBase1,           1023,             DA_DRW + DA_32 + DA_LIMIT_4K	;有1024个子页表，每个页表占4K字节(每个子页表有1024页表项，每个页表项占4字节)，所以设定最大偏移地址为1023，偏移单位为4K(DA_LIMIT_4K),
 ; GDT end
 
 GdtLen  equ $ - GDT_ENTRY	;全局段的长度 
@@ -30,12 +33,14 @@ GdtPtr:	;全局段描述符地址
 		
 ; GDT Selector(定义选择子)
 
-Code32Selector    equ (0x0001 << 3) + SA_TIG + SA_RPL0  ;第一个代码段的选择子下标为1 (0x001),
-VideoSelector     equ (0x0002 << 3) + SA_TIG + SA_RPL0  ;显示段的选择子下标为2 (0x002)
-Data32Selector    equ (0x0003 << 3) + SA_TIG + SA_RPL0  ;数据段的选择子下标为3 (0x003)
-Stack32Selector   equ (0x0004 << 3) + SA_TIG + SA_RPL0  ;32为保护模式下栈段的选择子下标为4 (0x004)
-PageDirSelector   equ (0x0005 << 3) + SA_TIG + SA_RPL0  ;页目录选择子
-PageTblSelector   equ (0x0006 << 3) + SA_TIG + SA_RPL0  ;子页表选择子
+Code32Selector    	equ (0x0001 << 3) + SA_TIG + SA_RPL0  ;第一个代码段的选择子下标为1 (0x001),
+VideoSelector     	equ (0x0002 << 3) + SA_TIG + SA_RPL0  ;显示段的选择子下标为2 (0x002)
+Data32Selector    	equ (0x0003 << 3) + SA_TIG + SA_RPL0  ;数据段的选择子下标为3 (0x003)
+Stack32Selector   	equ (0x0004 << 3) + SA_TIG + SA_RPL0  ;32为保护模式下栈段的选择子下标为4 (0x004)
+PageDirSelector0   	equ (0x0005 << 3) + SA_TIG + SA_RPL0  ;页目录选择子
+PageTblSelector0   	equ (0x0006 << 3) + SA_TIG + SA_RPL0  ;子页表选择子
+PageDirSelector1   	equ (0x0007 << 3) + SA_TIG + SA_RPL0  ;页目录选择子
+PageTblSelector1   	equ (0x0008 << 3) + SA_TIG + SA_RPL0  ;子页表选择子
 
 ; end of [section .gdt]
 
@@ -144,6 +149,8 @@ CODE32_SEGMENT:
 	mov ax, Stack32Selector ;设置栈空间(32位模式下有打印函数调用)
 	mov ss, ax
 	
+	
+	
 	mov eax, TopOfStack32
 	mov esp, eax  ;设置32位保护模式的栈顶
 	
@@ -158,25 +165,52 @@ CODE32_SEGMENT:
 	
 	call PrintString  ;调用被代码段内的打印函数PrintString
 	
+	;初始化第一个页表
+	mov eax, PageDirSelector0
+	mov ebx, PageTblSelector0
+	mov ecx, PageTblBase0
+	call InitPageTable
 	
-	call SetupPage	;页初始化
+	;初始化第二个页表
+	mov eax, PageDirSelector1
+	mov ebx, PageTblSelector1
+	mov ecx, PageTblBase1
+	
+	call InitPageTable
+	
+	;切换第一个页表
+	mov eax, PageDirBase0
+	call SwitchPageTable
+	
+	;切换第二个页表
+	mov eax, PageDirBase1
+	call SwitchPageTable
+	
+	;call SetupPage	;页初始化
 	
 	jmp $   ;断点可以打到此处，执行到此处，可以查看内存中数据段的值:  x /4bx ds:0    (表示以16进制查看4字节内容，查看地址为ds:0  即数据段偏移地址为0的地方)
 
+
 ;页初始化函数
-SetupPage:
+; eax -> 页目录选择子
+; ebx -> 页表选择子
+; ecx -> 页表基地址
+InitPageTable:
 	
-	push eax
-	push ecx
-	push edi
 	push es
+	push eax	;[esp + 12]
+	push ebx	;[esp + 8]
+	push ecx	;[esp + 4]
+	push edi   	;[esp]
+	
 	
 	;页目录初始化
-	mov ax, PageDirSelector
+	mov ax, [esp + 12]  ;页目录选择子
 	mov es, ax
 	mov ecx, 1024   ;循环1024次，总共有1024个页目录(即可以指向1024个子页表)
 	mov edi, 0   ; 初始化的目的地址为[es:edi]
-	mov eax, PageTblBase | PG_P | PG_USU | PG_RWW ; PageTblBase(初始化初值) | PG_P(页存在属性为) | PG_USU(用户级) | PG_RWW(读/写/执行属性)
+	mov eax, [esp + 4] ;页表基地址
+	or eax, PG_P | PG_USU | PG_RWW ; PG_P(页存在属性为) | PG_USU(用户级) | PG_RWW(读/写/执行属性)
 	
 	cld ;edi 递增(32位系统按4字节)
 	
@@ -186,7 +220,7 @@ stdir:
 	loop stdir
 	
 	;子页表初始化
-	mov ax, PageTblSelector
+	mov ax, [esp + 8]  ;页表选择子
 	mov es, ax
 	mov ecx, 1024 * 1024  ;子页表初始化为一个个子页表内的页表项初始化(1024个子页表，每个子页表1024个页表项，故循环1024*1024次初始化)
 	mov edi, 0	;初始化地址[es:edi]
@@ -198,18 +232,34 @@ sttbl:
 	stosd
 	add eax, 4096 ;页表项值每次递增4096
 	loop sttbl
+		
+	pop edi
+	pop ecx
+	pop ebx
+	pop eax
+	pop es
+	
+	ret
+	
+;页表切换函数
+;eax -> 页目录基地址
+SwitchPageTable:
+
+	push eax ;[esp]
+	
+	;暂时关闭页切换(cr0寄存区最高位置0)
+	mov eax, cr0
+	and eax, 0x7FFFFFFF
+	mov cr0, eax
 	
 	;开启硬件分页机制
-	mov eax, PageDirBase  ;将cr3指向也目录地址
+	mov eax, [esp]  ;将cr3指向也目录地址
 	mov cr3, eax
 	
 	mov eax, cr0 	;将cr0最高位置1
 	or eax, 0x80000000
 	mov cr0, eax
-	
-	pop es
-	pop edi
-	pop ecx
+
 	pop eax
 	
 	ret
