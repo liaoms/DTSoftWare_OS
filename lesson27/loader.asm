@@ -27,7 +27,9 @@ PAGE_DIR_DESC0 		:	Descriptor    PageDirBase0,           	4095,             	DA_
 PAGE_TBL_DESC0 		:   Descriptor    PageTblBase0,           	1023,             	DA_DRW + DA_32 + DA_LIMIT_4K	;有1024个子页表，每个页表占4K字节(每个子页表有1024页表项，每个页表项占4字节)，所以设定最大偏移地址为1023，偏移单位为4K(DA_LIMIT_4K),			
 PAGE_DIR_DESC1 		:   Descriptor    PageDirBase1,           	4095,             	DA_DRW + DA_32   ;页目录基地址描述符,页目录占4K(总共有1024个页目录，每个页目录占4字节)字节，即最大偏移地址为4095
 PAGE_TBL_DESC1 		:   Descriptor    PageTblBase1,           	1023,             	DA_DRW + DA_32 + DA_LIMIT_4K	;有1024个子页表，每个页表占4K字节(每个子页表有1024页表项，每个页表项占4字节)，所以设定最大偏移地址为1023，偏移单位为4K(DA_LIMIT_4K),
+FUNC32_DESC     	:   Descriptor        0,    			Func32SegLen -1,       	DA_DR +  DA_32		;函数数据段描述符为可执行属性
 FLAT_MODE_RW_DESC 	:   Descriptor        0,           	      0xFFFFF,              DA_DRW + DA_32 + DA_LIMIT_4K	;平坦内存模型(实现保护模式下指哪写哪)，32位X86最大访问内存为4G，所以设定基地址为0，最大偏移地址为0xFFFFF，偏移单位为4K(DA_LIMIT_4K)，总共地址为4G
+FLAT_MODE_C_DESC 	:   Descriptor        0,           	      0xFFFFF,              DA_C + DA_32 + DA_LIMIT_4K	;平坦内存模型(实现保护模式下指哪写哪)，32位X86最大访问内存为4G，所以设定基地址为0，最大偏移地址为0xFFFFF，偏移单位为4K(DA_LIMIT_4K)，总共地址为4G
 
 ; GDT end
 
@@ -47,7 +49,9 @@ PageDirSelector0   		equ (0x0005 << 3) + SA_TIG + SA_RPL0  ;页目录选择子
 PageTblSelector0   		equ (0x0006 << 3) + SA_TIG + SA_RPL0  ;子页表选择子
 PageDirSelector1   		equ (0x0007 << 3) + SA_TIG + SA_RPL0  ;页目录选择子
 PageTblSelector1   		equ (0x0008 << 3) + SA_TIG + SA_RPL0  ;子页表选择子
-FlatModeRWSelector  	equ (0x0009 << 3) + SA_TIG + SA_RPL0  ;平坦内存模型选择子
+Fun32Selector			equ (0x0009 << 3) + SA_TIG + SA_RPL0
+FlatModeRWSelector  	equ (0x000A << 3) + SA_TIG + SA_RPL0  ;平坦内存模型选择子
+FlatModeCSelector  		equ (0x000B << 3) + SA_TIG + SA_RPL0  ;可执行平坦内存模型选择子
 
 ; end of [section .gdt]
 
@@ -66,6 +70,41 @@ DATA32_SEGMENT:
 	HELLO_OFFSET equ HELLO - $$ ;字符串"D.T.OS!" 在数据段的偏移地址(字符串起始地址 - 段起始地址)
 
 Data32SegLen equ $ - DATA32_SEGMENT  ;数据段长度
+
+;定义一个函数数据段
+[section .func]
+[bits 32]
+FUNC32_SEGMENT:
+
+;平方函数
+; cx 入参
+; eax = cx * cx
+Sqr:
+	mov eax, 0
+	mov ax, cx
+	mul cx
+	retf
+SqrLen equ $ - Sqr
+SqrFun equ Sqr - $$
+
+;累加函数
+; cx 入参
+; eax = 1 + 2 + 3 + ... cx
+Acc:
+	mov eax, 0
+	push cx
+	
+AccLoop:
+	add ax, cx
+	loop AccLoop
+	
+	pop cx
+	retf
+	
+AccLen equ $ - Acc
+AccFun equ Acc - $$
+
+Func32SegLen equ $ - FUNC32_SEGMENT 
 
 
 
@@ -97,6 +136,11 @@ ENTRY_SEGMENT:
 	;数据段初始化
 	mov esi, DATA32_SEGMENT
 	mov edi, DATA32_DESC	
+	call InitDescItem
+	
+	;函数数据段初始化
+	mov esi, FUNC32_SEGMENT
+	mov edi, FUNC32_DESC
 	call InitDescItem
 	
 	;32位保护模式栈段初始化
@@ -167,23 +211,34 @@ CODE32_SEGMENT:
 	mov esp, eax  ;设置32位保护模式的栈顶
 	
 	;设置参数并调用打印函数
-	mov ax, Data32Selector ;数据段选择子
+	;mov ax, Data32Selector ;数据段选择子
+	mov ax, Fun32Selector	;拷贝的数据为函数数据，所以使用函数的数据段
 	mov ds, ax
 	
 	;----------------准备数据----------------------------
 	mov ax,FlatModeRWSelector ;使用平坦内存模型
 	mov es, ax
 	
-	mov esi, DTOS_OFFSET  ;数据源为数据段偏移地址为 DTOS_OFFSET处的字符串[ds:esi]
-	mov edi, TargetAddrY  ;目的地址为实际物理地址0x501000 [es:edi]
-	mov ecx, DTOS_LEN
+	;mov esi, DTOS_OFFSET  ;数据源为数据段偏移地址为 DTOS_OFFSET处的字符串[ds:esi]
+	;mov edi, TargetAddrY  ;目的地址为实际物理地址0x501000 [es:edi]
+	;mov ecx, DTOS_LEN
+	
+	;拷贝内容为函数数据
+	mov esi, AccFun
+	mov edi, TargetAddrY
+	mov ecx, AccLen
 	
 	call MemCpy32	;开始拷贝, 拷贝完成后可使用内存查看命令 x /8bx ds:esi  x /8bx 0x501000 分别查看ds:处8字节内容与 物理地址0x501000物理地址处8字节内容，结果一致，说明实现了保护模式下操作具体物理地址 
 	
-	mov esi, HELLO_OFFSET  ;数据源为数据段偏移地址为 HELLO_OFFSET处的字符串[ds:esi]
-	mov edi, TargetAddrZ  ;目的地址为实际物理地址0x601000 [es:edi]
-	mov ecx, HELLO_LEN
+	;mov esi, HELLO_OFFSET  ;数据源为数据段偏移地址为 HELLO_OFFSET处的字符串[ds:esi]
+	;mov edi, TargetAddrZ  ;目的地址为实际物理地址0x601000 [es:edi]
+	;mov ecx, HELLO_LEN
 	
+	;拷贝内容为函数数据
+	mov esi, SqrFun
+	mov edi, TargetAddrZ
+	mov ecx, SqrLen
+		
 	call MemCpy32	;开始拷贝, 拷贝完成后可使用内存查看命令 x /8bx ds:esi  x /8bx 0x601000 分别查看ds:处8字节内容与 物理地址0x601000物理地址处8字节内容，结果一致，说明实现了保护模式下操作具体物理地址 
 
 	;-----------------初始化页表--------------------------
@@ -226,26 +281,32 @@ CODE32_SEGMENT:
 	mov eax, PageDirBase0
 	call SwitchPageTable
 	
-	mov ax, FlatModeRWSelector   ;使用平坦模式
-	mov ds, ax
+	mov ecx, 100
+	call FlatModeCSelector:ObjectAddrX ;调用虚地址处的函数，第二个页表中该地址实际对应的物理地址为累加函数入口地址
 	
-	mov ebp, ObjectAddrX  ; 打印虚拟地址处的字符串，此时该虚拟地址已经映射到页表0的实际物理地址，所以实际打印的是映射到0号页表的物理地址处的字符串
-	mov bx, 0x0c 	;打印属性黑底红字
-	mov dh, 12 ;打印位置 12行33列
-	mov dl, 33
-	
-	call PrintString  ;调用被代码段内的打印函数PrintString
+	;mov ax, FlatModeRWSelector   ;使用平坦模式
+	;mov ds, ax
+	;
+	;mov ebp, ObjectAddrX  ; 打印虚拟地址处的字符串，此时该虚拟地址已经映射到页表0的实际物理地址，所以实际打印的是映射到0号页表的物理地址处的字符串
+	;mov bx, 0x0c 	;打印属性黑底红字
+	;mov dh, 12 ;打印位置 12行33列
+	;mov dl, 33
+	;
+	;call PrintString  ;调用被代码段内的打印函数PrintString
 	
 	;切换第二个页表
 	mov eax, PageDirBase1
 	call SwitchPageTable
+		
+	mov ecx, 100
+	call FlatModeCSelector:ObjectAddrX ;调用虚地址处的函数，第二个页表中该地址实际对应的物理地址为平方函数入口地址
 	
-	mov ebp, ObjectAddrX  ;同一个虚拟地址，此时已经映射到页表2对应的物理地址
-	mov bx, 0x0c 	;打印属性黑底红字
-	mov dh, 13 ;打印位置 13行33列
-	mov dl, 31
-	
-	call PrintString  ;调用被代码段内的打印函数PrintString
+	;mov ebp, ObjectAddrX  ;同一个虚拟地址，此时已经映射到页表2对应的物理地址
+	;mov bx, 0x0c 	;打印属性黑底红字
+	;mov dh, 13 ;打印位置 13行33列
+	;mov dl, 31
+	;
+	;call PrintString  ;调用被代码段内的打印函数PrintString
 	
 	
 	jmp $   ;断点可以打到此处，执行到此处 
