@@ -194,17 +194,17 @@ CODE32_SEGMENT:
 
 	
 	;初始化第一个页表
-	;mov eax, PageDirSelector0
-	;mov ebx, PageTblSelector0
-	;mov ecx, PageTblBase0
-	;call InitPageTable
+	mov eax, PageDirSelector0
+	mov ebx, PageTblSelector0
+	mov ecx, PageTblBase0
+	call InitPageTable
 	
 	;初始化第二个页表
-	;mov eax, PageDirSelector1
-	;mov ebx, PageTblSelector1
-	;mov ecx, PageTblBase1
-	;
-	;call InitPageTable
+	mov eax, PageDirSelector1
+	mov ebx, PageTblSelector1
+	mov ecx, PageTblBase1
+	
+	call InitPageTable
 	
 	;切换第一个页表
 	;mov eax, PageDirBase0
@@ -216,7 +216,66 @@ CODE32_SEGMENT:
 	
 	;call SetupPage	;页初始化	
 	
-	jmp $   ;断点可以打到此处，执行到此处，可以查看内存中数据段的值:  x /4bx ds:0    (表示以16进制查看4字节内容，查看地址为ds:0  即数据段偏移地址为0的地方)
+	mov eax, ObjectAddrX   ;取被映射的虚拟地址
+	mov ebx, TargetAddrY	;取要映射到虚拟地址的物理地址
+	mov ecx, PageDirBase0   ;映射地方为0号页目录中
+	
+	call MapAddress   ;断点查看 页目录基地址 PageDirBaseX + 1*4 位置，得到子页表起始地址，值(低12位属性位清零)+偏移地址1*4 得到物理地址的存储位置，读取该位置即得到物理地址值 
+	
+	mov eax, ObjectAddrX   ;取被映射的虚拟地址
+	mov ebx, TargetAddrZ	;取要映射到虚拟地址的物理地址
+	mov ecx, PageDirBase1   ;映射地方为1号页目录中
+	
+	call MapAddress
+	
+	;断点查看：虚地址的高十位为子页表在页目录的偏移地址，页基地址 + 高十位值 = 子页表起始地址
+	;		   虚地址中间十位为物理地址在子页表中的偏移位置， 子页表起始地址 + 中十位值 = 物理地址在子页表的保存位置
+	;以虚拟地址0x401000为例，高十位十进制值为1，中间十位十进制值为1， 
+	;则对于0号页目录来说，子页表地址保存处为 0x200000 + 1*4(4字节) = 0x200004， x /1wx 0x200004  得到子页表起始地址值
+	;得到的子页表起始地址值低12位属性位清零，加上物理地址在子页表的偏移位置  xxx + 1*4  得到保存物理地址的位置，读取改位置，就得到物理内存地址 
+	jmp $   ;断点可以打到此处，执行到此处 
+
+; 虚拟地址到物理地址的映射函数(使用不同的子页表，同一虚拟地址映射到不同的物理地址)
+; es -> 平坦内存模型选择子
+; eax -> 虚拟地址
+; ebx-> 映射到的目标物理地址
+; ecx -> 页目录基地址
+MapAddress:
+	push es		;[esp + 12]
+	push eax	;[esp + 8]
+	push ebx	;[esp + 4]
+	push ecx	;[esp]
+
+	; 1、取虚拟地址高10位，计算子页表在页目录的位置
+	mov eax, [esp + 8]	;取虚拟地址
+	shr eax, 22			;右移22位
+	and eax, 1111111111b	;and 10位1，把右移后的高22位全清零，只留10位(最开始eax的高十位)，得到偏移地址
+	shl eax, 2				;地址需要 * 4  (32位机)，eax得到子页表在页目录的偏移位置
+	
+	; 2、取虚拟地址中间10位，计算物理地址在子页表的位置 (方法同上)
+	mov ebx, [esp + 8]
+	shr ebx, 12
+	and ebx, 1111111111b
+	shl ebx, 2	;ebx得到物理地址在子页表的偏移位置保存处
+	
+	; 3、取子页表起始地址
+	mov esi, [esp] ;取也目录基地址
+	add esi, eax	;加上子页表在页目录基地址的偏移位置
+	mov edi, [es:esi]  ;平坦模式下从页目录子页表的偏移位置取出4字节内容，得到子页表的起始地址
+	and edi, 0xFFFFF000   ;去除低12位属性位置，edi最终保存的是子页表的最终起始地址
+	
+	; 4、将目标物理地址写入子页表对应保存物理地址的位置
+	add edi, ebx  ;子页表起始地址 + 物理地址在子页表的偏移位置 => 物理地址最终保存位置
+	mov ecx, [esp + 4]	;取实际要映射的物理地址
+	and ecx, 0xFFFFF000		;去掉低12位属性位
+	or ecx, PG_P | PG_USU | PG_RWW  ;补充属性
+	mov [es:edi], ecx   ;将要映射的物理地址写入子页表的对应位置	
+
+	pop ecx
+	pop ebx
+	pop eax
+	pop es
+ret
 
 ;	-> 32位保护模式内存拷贝函数
 ;es ->平坦内存模型对应的选择子
