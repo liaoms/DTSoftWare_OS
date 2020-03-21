@@ -3,12 +3,12 @@
 
 PageDirBase0	equ 0x200000   	;定义页目录基地址
 PageTblBase0	equ 0x201000	;定义子页表基地址
-PageDirBase1	equ 0x300000   	;定义页目录基地址
-PageTblBase1	equ 0x301000	;定义子页表基地址
+PageDirBase1	equ 0x700000   	;定义页目录基地址  (页表间距要大些，防止内存覆盖，一个页表空间为1024 * 4096 = 0x400000)
+PageTblBase1	equ 0x701000	;定义子页表基地址
 
 ObjectAddrX		equ 0x401000	;目标虚地址    (最终目标为，在不同页表下，该虚地址映射到如下两个不同的物理地址处)
-TargetAddrY		equ 0x501000	;目标物理地址
-TargetAddrZ		equ 0x601000	;目标物理地址
+TargetAddrY		equ 0xD01000	;目标物理地址
+TargetAddrZ		equ 0xE01000	;目标物理地址
 
 org 0x9000	;新增loader程序，供启动程序跳转到此处执行，起始地址为0x9000
 
@@ -170,13 +170,7 @@ CODE32_SEGMENT:
 	mov ax, Data32Selector ;数据段选择子
 	mov ds, ax
 	
-	mov ebp, DTOS_OFFSET  ;字符在数据段的偏移地址
-	mov bx, 0x0c 	;打印属性黑底红字
-	mov dh, 12 ;打印位置 12行33列
-	mov dl, 33
-	
-	call PrintString  ;调用被代码段内的打印函数PrintString
-	
+	;----------------准备数据----------------------------
 	mov ax,FlatModeRWSelector ;使用平坦内存模型
 	mov es, ax
 	
@@ -192,7 +186,7 @@ CODE32_SEGMENT:
 	
 	call MemCpy32	;开始拷贝, 拷贝完成后可使用内存查看命令 x /8bx ds:esi  x /8bx 0x601000 分别查看ds:处8字节内容与 物理地址0x601000物理地址处8字节内容，结果一致，说明实现了保护模式下操作具体物理地址 
 
-	
+	;-----------------初始化页表--------------------------
 	;初始化第一个页表
 	mov eax, PageDirSelector0
 	mov ebx, PageTblSelector0
@@ -205,16 +199,9 @@ CODE32_SEGMENT:
 	mov ecx, PageTblBase1
 	
 	call InitPageTable
+
 	
-	;切换第一个页表
-	;mov eax, PageDirBase0
-	;call SwitchPageTable
-	
-	;切换第二个页表
-	;mov eax, PageDirBase1
-	;call SwitchPageTable
-	
-	;call SetupPage	;页初始化	
+	;-------------地址映射-------------------------
 	
 	mov eax, ObjectAddrX   ;取被映射的虚拟地址
 	mov ebx, TargetAddrY	;取要映射到虚拟地址的物理地址
@@ -233,6 +220,34 @@ CODE32_SEGMENT:
 	;以虚拟地址0x401000为例，高十位十进制值为1，中间十位十进制值为1， 
 	;则对于0号页目录来说，子页表地址保存处为 0x200000 + 1*4(4字节) = 0x200004， x /1wx 0x200004  得到子页表起始地址值
 	;得到的子页表起始地址值低12位属性位清零，加上物理地址在子页表的偏移位置  xxx + 1*4  得到保存物理地址的位置，读取改位置，就得到物理内存地址 
+	
+	
+	;切换第一个页表
+	mov eax, PageDirBase0
+	call SwitchPageTable
+	
+	mov ax, FlatModeRWSelector   ;使用平坦模式
+	mov ds, ax
+	
+	mov ebp, ObjectAddrX  ; 打印虚拟地址处的字符串，此时该虚拟地址已经映射到页表0的实际物理地址，所以实际打印的是映射到0号页表的物理地址处的字符串
+	mov bx, 0x0c 	;打印属性黑底红字
+	mov dh, 12 ;打印位置 12行33列
+	mov dl, 33
+	
+	call PrintString  ;调用被代码段内的打印函数PrintString
+	
+	;切换第二个页表
+	mov eax, PageDirBase1
+	call SwitchPageTable
+	
+	mov ebp, ObjectAddrX  ;同一个虚拟地址，此时已经映射到页表2对应的物理地址
+	mov bx, 0x0c 	;打印属性黑底红字
+	mov dh, 13 ;打印位置 13行33列
+	mov dl, 31
+	
+	call PrintString  ;调用被代码段内的打印函数PrintString
+	
+	
 	jmp $   ;断点可以打到此处，执行到此处 
 
 ; 虚拟地址到物理地址的映射函数(使用不同的子页表，同一虚拟地址映射到不同的物理地址)
