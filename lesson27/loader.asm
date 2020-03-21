@@ -60,6 +60,10 @@ DATA32_SEGMENT:
 	DTOS    db "D.T.OS!", 0  ;以0结尾的字符串 "D.T.OS!"
 	DTOS_LEN equ $ - DTOS		;当前地址 - 字符串起始地址 
 	DTOS_OFFSET equ DTOS - $$ ;字符串"D.T.OS!" 在数据段的偏移地址(字符串起始地址 - 段起始地址)
+	
+	HELLO    db "HELLO WORD!", 0  ;以0结尾的字符串 "D.T.OS!"
+	HELLO_LEN equ $ - HELLO		;当前地址 - 字符串起始地址 
+	HELLO_OFFSET equ HELLO - $$ ;字符串"D.T.OS!" 在数据段的偏移地址(字符串起始地址 - 段起始地址)
 
 Data32SegLen equ $ - DATA32_SEGMENT  ;数据段长度
 
@@ -173,6 +177,22 @@ CODE32_SEGMENT:
 	
 	call PrintString  ;调用被代码段内的打印函数PrintString
 	
+	mov ax,FlatModeRWSelector ;使用平坦内存模型
+	mov es, ax
+	
+	mov esi, DTOS_OFFSET  ;数据源为数据段偏移地址为 DTOS_OFFSET处的字符串[ds:esi]
+	mov edi, TargetAddrY  ;目的地址为实际物理地址0x501000 [es:edi]
+	mov ecx, DTOS_LEN
+	
+	call MemCpy32	;开始拷贝, 拷贝完成后可使用内存查看命令 x /8bx ds:esi  x /8bx 0x501000 分别查看ds:处8字节内容与 物理地址0x501000物理地址处8字节内容，结果一致，说明实现了保护模式下操作具体物理地址 
+	
+	mov esi, HELLO_OFFSET  ;数据源为数据段偏移地址为 HELLO_OFFSET处的字符串[ds:esi]
+	mov edi, TargetAddrZ  ;目的地址为实际物理地址0x601000 [es:edi]
+	mov ecx, HELLO_LEN
+	
+	call MemCpy32	;开始拷贝, 拷贝完成后可使用内存查看命令 x /8bx ds:esi  x /8bx 0x601000 分别查看ds:处8字节内容与 物理地址0x601000物理地址处8字节内容，结果一致，说明实现了保护模式下操作具体物理地址 
+
+	
 	;初始化第一个页表
 	;mov eax, PageDirSelector0
 	;mov ebx, PageTblSelector0
@@ -194,16 +214,7 @@ CODE32_SEGMENT:
 	;mov eax, PageDirBase1
 	;call SwitchPageTable
 	
-	;call SetupPage	;页初始化
-	
-	mov ax,FlatModeRWSelector ;使用平坦内存模型
-	mov es, ax
-	
-	mov esi, DTOS_OFFSET  ;数据源为数据段偏移地址为 DTOS_OFFSET处的字符串[ds:esi]
-	mov edi, TargetAddrY  ;目的地址为实际物理地址0x501000 [es:edi]
-	mov ecx, DTOS_LEN
-	
-	call MemCpy32	;开始拷贝, 拷贝完成后可使用内存查看命令 x /8bx ds:0  x /8bx 0x501000 分别查看ds:处8字节内容与 物理地址0x501000物理地址处8字节内容，结果一致，说明实现了保护模式下操作具体物理地址 
+	;call SetupPage	;页初始化	
 	
 	jmp $   ;断点可以打到此处，执行到此处，可以查看内存中数据段的值:  x /4bx ds:0    (表示以16进制查看4字节内容，查看地址为ds:0  即数据段偏移地址为0的地方)
 
