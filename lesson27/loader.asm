@@ -6,6 +6,10 @@ PageTblBase0	equ 0x201000	;定义子页表基地址
 PageDirBase1	equ 0x300000   	;定义页目录基地址
 PageTblBase1	equ 0x301000	;定义子页表基地址
 
+ObjectAddrX		equ 0x401000	;目标虚地址    (最终目标为，在不同页表下，该虚地址映射到如下两个不同的物理地址处)
+TargetAddrY		equ 0x501000	;目标物理地址
+TargetAddrZ		equ 0x601000	;目标物理地址
+
 org 0x9000	;新增loader程序，供启动程序跳转到此处执行，起始地址为0x9000
 
 jmp ENTRY_SEGMENT	;跳转执行
@@ -13,16 +17,18 @@ jmp ENTRY_SEGMENT	;跳转执行
 [section .gdt]	;定义一个源码级别的代码段
 ; GDT definition
 ;
-;                                 段基址   			    段界限              段属性
-GDT_ENTRY    :     Descriptor        0,    			      0,                   0        	;全局段入口(0占位)
-CODE32_DESC  :     Descriptor        0,    			Code32SegLen -1,       DA_C + DA_32		;定义第一个32位代码段描述符,
-VIDEO_DESC   :     Descriptor     0xB8000, 			    0x07FFF,           DA_DRWA + DA_32	;定义一个显示段范围0xB8000~0xBFFFF，段界限为偏移地址的最大值(0xBFFFF-0xB8000)属性为 已访问的可读写数据段 + 保护模式下32位段
-DATA32_DESC  :     Descriptor        0,    			Data32SegLen - 1,      DA_DRW + DA_32	;定义数据段描述符   
-STACK32_DESC :     Descriptor        0,    			TopOfStack32,          DA_DRW + DA_32	;定义32为保护模式下栈段描述符(栈空间) 
-PAGE_DIR_DESC0 :    Descriptor    PageDirBase0,           4095,             DA_DRW + DA_32   ;页目录基地址描述符,页目录占4K(总共有1024个页目录，每个页目录占4字节)字节，即最大偏移地址为4095
-PAGE_TBL_DESC0 :    Descriptor    PageTblBase0,           1023,             DA_DRW + DA_32 + DA_LIMIT_4K	;有1024个子页表，每个页表占4K字节(每个子页表有1024页表项，每个页表项占4字节)，所以设定最大偏移地址为1023，偏移单位为4K(DA_LIMIT_4K),			
-PAGE_DIR_DESC1 :    Descriptor    PageDirBase1,           4095,             DA_DRW + DA_32   ;页目录基地址描述符,页目录占4K(总共有1024个页目录，每个页目录占4字节)字节，即最大偏移地址为4095
-PAGE_TBL_DESC1 :    Descriptor    PageTblBase1,           1023,             DA_DRW + DA_32 + DA_LIMIT_4K	;有1024个子页表，每个页表占4K字节(每个子页表有1024页表项，每个页表项占4字节)，所以设定最大偏移地址为1023，偏移单位为4K(DA_LIMIT_4K),
+;                                 		段基址   			    段界限              段属性
+GDT_ENTRY    		:   Descriptor        0,    			      0,                   0        	;全局段入口(0占位)
+CODE32_DESC  		:   Descriptor        0,    			Code32SegLen -1,       	DA_C + DA_32		;定义第一个32位代码段描述符,
+VIDEO_DESC   		:   Descriptor     0xB8000, 			    0x07FFF,           	DA_DRWA + DA_32	;定义一个显示段范围0xB8000~0xBFFFF，段界限为偏移地址的最大值(0xBFFFF-0xB8000)属性为 已访问的可读写数据段 + 保护模式下32位段
+DATA32_DESC  		:   Descriptor        0,    			Data32SegLen - 1,      	DA_DRW + DA_32	;定义数据段描述符   
+STACK32_DESC 		:   Descriptor        0,    			TopOfStack32,          	DA_DRW + DA_32	;定义32为保护模式下栈段描述符(栈空间) 
+PAGE_DIR_DESC0 		:	Descriptor    PageDirBase0,           	4095,             	DA_DRW + DA_32   ;页目录基地址描述符,页目录占4K(总共有1024个页目录，每个页目录占4字节)字节，即最大偏移地址为4095
+PAGE_TBL_DESC0 		:   Descriptor    PageTblBase0,           	1023,             	DA_DRW + DA_32 + DA_LIMIT_4K	;有1024个子页表，每个页表占4K字节(每个子页表有1024页表项，每个页表项占4字节)，所以设定最大偏移地址为1023，偏移单位为4K(DA_LIMIT_4K),			
+PAGE_DIR_DESC1 		:   Descriptor    PageDirBase1,           	4095,             	DA_DRW + DA_32   ;页目录基地址描述符,页目录占4K(总共有1024个页目录，每个页目录占4字节)字节，即最大偏移地址为4095
+PAGE_TBL_DESC1 		:   Descriptor    PageTblBase1,           	1023,             	DA_DRW + DA_32 + DA_LIMIT_4K	;有1024个子页表，每个页表占4K字节(每个子页表有1024页表项，每个页表项占4字节)，所以设定最大偏移地址为1023，偏移单位为4K(DA_LIMIT_4K),
+FLAT_MODE_RW_DESC 	:   Descriptor        0,           	      0xFFFFF,              DA_DRW + DA_32 + DA_LIMIT_4K	;平坦内存模型(实现保护模式下指哪写哪)，32位X86最大访问内存为4G，所以设定基地址为0，最大偏移地址为0xFFFFF，偏移单位为4K(DA_LIMIT_4K)，总共地址为4G
+
 ; GDT end
 
 GdtLen  equ $ - GDT_ENTRY	;全局段的长度 
@@ -33,14 +39,15 @@ GdtPtr:	;全局段描述符地址
 		
 ; GDT Selector(定义选择子)
 
-Code32Selector    	equ (0x0001 << 3) + SA_TIG + SA_RPL0  ;第一个代码段的选择子下标为1 (0x001),
-VideoSelector     	equ (0x0002 << 3) + SA_TIG + SA_RPL0  ;显示段的选择子下标为2 (0x002)
-Data32Selector    	equ (0x0003 << 3) + SA_TIG + SA_RPL0  ;数据段的选择子下标为3 (0x003)
-Stack32Selector   	equ (0x0004 << 3) + SA_TIG + SA_RPL0  ;32为保护模式下栈段的选择子下标为4 (0x004)
-PageDirSelector0   	equ (0x0005 << 3) + SA_TIG + SA_RPL0  ;页目录选择子
-PageTblSelector0   	equ (0x0006 << 3) + SA_TIG + SA_RPL0  ;子页表选择子
-PageDirSelector1   	equ (0x0007 << 3) + SA_TIG + SA_RPL0  ;页目录选择子
-PageTblSelector1   	equ (0x0008 << 3) + SA_TIG + SA_RPL0  ;子页表选择子
+Code32Selector    		equ (0x0001 << 3) + SA_TIG + SA_RPL0  ;第一个代码段的选择子下标为1 (0x001),
+VideoSelector     		equ (0x0002 << 3) + SA_TIG + SA_RPL0  ;显示段的选择子下标为2 (0x002)
+Data32Selector    		equ (0x0003 << 3) + SA_TIG + SA_RPL0  ;数据段的选择子下标为3 (0x003)
+Stack32Selector   		equ (0x0004 << 3) + SA_TIG + SA_RPL0  ;32为保护模式下栈段的选择子下标为4 (0x004)
+PageDirSelector0   		equ (0x0005 << 3) + SA_TIG + SA_RPL0  ;页目录选择子
+PageTblSelector0   		equ (0x0006 << 3) + SA_TIG + SA_RPL0  ;子页表选择子
+PageDirSelector1   		equ (0x0007 << 3) + SA_TIG + SA_RPL0  ;页目录选择子
+PageTblSelector1   		equ (0x0008 << 3) + SA_TIG + SA_RPL0  ;子页表选择子
+FlatModeRWSelector  	equ (0x0009 << 3) + SA_TIG + SA_RPL0  ;平坦内存模型选择子
 
 ; end of [section .gdt]
 
@@ -51,7 +58,8 @@ TopOfStack16 equ 0x7c00   ;定义常量，16位模式下的栈顶初始值
 [bits 32]
 DATA32_SEGMENT:
 	DTOS    db "D.T.OS!", 0  ;以0结尾的字符串 "D.T.OS!"
-	DTOS_OFFSET equ DTOS - $$ ;字符串"D.T.OS!" 在数据段的偏移地址
+	DTOS_LEN equ $ - DTOS		;当前地址 - 字符串起始地址 
+	DTOS_OFFSET equ DTOS - $$ ;字符串"D.T.OS!" 在数据段的偏移地址(字符串起始地址 - 段起始地址)
 
 Data32SegLen equ $ - DATA32_SEGMENT  ;数据段长度
 
@@ -166,29 +174,87 @@ CODE32_SEGMENT:
 	call PrintString  ;调用被代码段内的打印函数PrintString
 	
 	;初始化第一个页表
-	mov eax, PageDirSelector0
-	mov ebx, PageTblSelector0
-	mov ecx, PageTblBase0
-	call InitPageTable
+	;mov eax, PageDirSelector0
+	;mov ebx, PageTblSelector0
+	;mov ecx, PageTblBase0
+	;call InitPageTable
 	
 	;初始化第二个页表
-	mov eax, PageDirSelector1
-	mov ebx, PageTblSelector1
-	mov ecx, PageTblBase1
-	
-	call InitPageTable
+	;mov eax, PageDirSelector1
+	;mov ebx, PageTblSelector1
+	;mov ecx, PageTblBase1
+	;
+	;call InitPageTable
 	
 	;切换第一个页表
-	mov eax, PageDirBase0
-	call SwitchPageTable
+	;mov eax, PageDirBase0
+	;call SwitchPageTable
 	
 	;切换第二个页表
-	mov eax, PageDirBase1
-	call SwitchPageTable
+	;mov eax, PageDirBase1
+	;call SwitchPageTable
 	
 	;call SetupPage	;页初始化
 	
+	mov ax,FlatModeRWSelector ;使用平坦内存模型
+	mov es, ax
+	
+	mov esi, DTOS_OFFSET  ;数据源为数据段偏移地址为 DTOS_OFFSET处的字符串[ds:esi]
+	mov edi, TargetAddrY  ;目的地址为实际物理地址0x501000 [es:edi]
+	mov ecx, DTOS_LEN
+	
+	call MemCpy32	;开始拷贝, 拷贝完成后可使用内存查看命令 x /8bx ds:0  x /8bx 0x501000 分别查看ds:处8字节内容与 物理地址0x501000物理地址处8字节内容，结果一致，说明实现了保护模式下操作具体物理地址 
+	
 	jmp $   ;断点可以打到此处，执行到此处，可以查看内存中数据段的值:  x /4bx ds:0    (表示以16进制查看4字节内容，查看地址为ds:0  即数据段偏移地址为0的地方)
+
+;	-> 32位保护模式内存拷贝函数
+;es ->平坦内存模型对应的选择子
+;ds:esi	-> 拷贝源地址
+;es:edi	-> 拷贝目标地址
+;ecx		-> 拷贝长度
+MemCpy32:
+	
+	push esi
+	push edi
+	push ecx
+	push ax
+	
+	cmp esi, edi	;比较esi,edi大小
+	ja btoe		; si > di,跳转到btoe(从头拷贝到尾)
+	
+	add esi, ecx	;si <= di, si和di位置移到内存尾部
+	add edi, ecx
+	dec esi		;指向尾部最后一个有效字节
+	dec edi
+	jmp etob
+	
+btoe:	;将si一个个字节拷贝到di(从前到后)
+	cmp ecx, 0
+	jz done
+	mov al, [ds:esi]   
+	mov byte [es:edi], al
+	inc esi	;地址自增
+	inc edi
+	dec ecx
+	jmp btoe
+	
+etob:	;将si一个个字节拷贝到di(从后到前)
+	cmp ecx, 0
+	jz done
+	mov al, [ds:esi]
+	mov byte [es:edi], al
+	dec esi	;地址自减
+	dec edi
+	dec ecx
+	jmp etob
+	
+done:
+	pop ax
+	pop ecx
+	pop edi
+	pop esi
+	
+	ret
 
 
 ;页初始化函数
