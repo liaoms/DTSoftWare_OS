@@ -46,7 +46,9 @@ DATA32_SEGMENT:
 Data32SegLen equ $ - DATA32_SEGMENT  ;数据段长度
 
 
-MEM_SIZE times 4 db 0   ;定义4字节内存，用于保存物理内存容量
+MEM_SIZE 		times 4 db 0   			;定义4字节内存，用于保存物理内存容量
+MEM_ADRS_NUM 	times 4 db 0   			;定义4字节内存，用于保存查到的ADRS结构的数量
+MEM_ADRS 		times 64 * 20 db 0		;定义64个ADRS结构体，每个结构体占20个字节
 
 ;实模式的代码段定义
 [section .s16]
@@ -59,7 +61,8 @@ ENTRY_SEGMENT:
 	mov sp, TopOfStack16
 	
 	;获取物理内存大小
-	call GetMemSize   ;打断点，查看内存 MEM_SIZE 处的大小(单位为字节)，即为物理内存大小，此处大小为0x2000000 / 1024 / 1024 = 32M,与bochsrc里的内存配置大小一致
+	;call GetMemSize   ;打断点，查看内存 MEM_SIZE 处的大小(单位为字节)，即为物理内存大小，此处大小为0x2000000 / 1024 / 1024 = 32M,与bochsrc里的内存配置大小一致
+	call InitSysMenBuf ;打断点，查看MEM_ADRS_NUM、MEM_ADRS内存的地址值，MEM_ADRS每次查看1个ADRS结构体(20字节),地址查看方式为找到函数的入口地址，再在函数中找该两个变量的地址
 	
 	;代码段初始化
 	mov esi, CODE32_SEGMENT
@@ -153,7 +156,7 @@ GetMemSize:
 	jmp getOK
 	
 geterr:
-	mov dword [MEM_SIZE], 0
+	mov dword [MEM_SIZE], 0  
 
 getOK:
  	
@@ -163,6 +166,51 @@ getOK:
 	pop eax
 	
 	ret
+	
+;通过ADRS结构体获取物理内存容量
+; return 
+; eax -> 0 succeed    1  failed
+InitSysMenBuf:
+	push edi
+	push ebx
+	push ecx
+	push edx
+	
+	mov edi, MEM_ADRS   ;结构体赋值到edi寄存器
+	mov ebx, 0	;ebx 寄存器必须设置为0
+
+doLoop:
+	mov eax, 0xE820     ;特殊设置
+	mov edx, 0x534D4150 ;特殊设置
+	mov ecx, 20			;表示ADRS结构体大小(为20字节)
+	
+	int 0x15   ;触发中断， 将一个ADRS结构体内容存到edi所指向的MEM_ADRS地址中
+	
+	jc memerr   ;判断CF位是否为1，为1表示出错，跳转到memerr
+	
+	add edi, 20   ;正常提取一个ADRS结构体后，edi往后偏移20字节，准备保存下次循环提取的ADRS结构体(一个ADRS占用20字节)
+	inc dword [MEM_ADRS_NUM]   ;ADRS结构体计数自增1
+	
+	cmp ebx, 0   ;判断 ebx 是否为0
+	jne doLoop  ;不为0则继续循环， 为零则循环结束，接着往下走
+	
+	mov eax, 0
+	jmp memok
+	
+memerr:
+	mov eax, 1
+	mov dword [MEM_SIZE], 0
+	mov dword [MEM_ADRS_NUM], 0
+	mov dword [MEM_ADRS], 0
+
+memok:	
+	pop edx
+	pop ecx
+	pop ebx
+	pop edi
+
+
+ret
 	
 ;定义32位代码段
 [section .s32]	
