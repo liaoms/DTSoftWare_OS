@@ -12,7 +12,8 @@ GDT_ENTRY    		:   Descriptor        0,    			      0,                   0      
 CODE32_DESC  		:   Descriptor        0,    			Code32SegLen -1,       	DA_C + DA_32		;定义第一个32位代码段描述符,
 VIDEO_DESC   		:   Descriptor     0xB8000, 			    0x07FFF,           	DA_DRWA + DA_32	;定义一个显示段范围0xB8000~0xBFFFF，段界限为偏移地址的最大值(0xBFFFF-0xB8000)属性为 已访问的可读写数据段 + 保护模式下32位段
 DATA32_DESC  		:   Descriptor        0,    			Data32SegLen - 1,      	DA_DRW + DA_32	;定义数据段描述符   
-STACK32_DESC 		:   Descriptor        0,    			TopOfStack32,          	DA_DRW + DA_32	;定义32为保护模式下栈段描述符(栈空间) 
+STACK32_DESC 		:   Descriptor        0,    			TopOfStack32,          	DA_DRW + DA_32	;定义32为保护模式下栈段描述符(栈空间)
+SYSDATE32_DESC      :   Descriptor        0,    			SysDate32SegLen - 1,    DA_DR + DA_32	;定义32为保护模式下只读数据段 
 ; GDT end
 
 GdtLen  equ $ - GDT_ENTRY	;全局段的长度 
@@ -27,9 +28,19 @@ Code32Selector    		equ (0x0001 << 3) + SA_TIG + SA_RPL0  ;第一个代码段的
 VideoSelector     		equ (0x0002 << 3) + SA_TIG + SA_RPL0  ;显示段的选择子下标为2 (0x002)
 Data32Selector    		equ (0x0003 << 3) + SA_TIG + SA_RPL0  ;数据段的选择子下标为3 (0x003)
 Stack32Selector   		equ (0x0004 << 3) + SA_TIG + SA_RPL0  ;32为保护模式下栈段的选择子下标为4 (0x004)
+SysDate32Selector   	equ (0x0005 << 3) + SA_TIG + SA_RPL0  ;定义32为保护模式下只读数据段 的选择子
 ; end of [section .gdt]
 
 TopOfStack16 equ 0x7c00   ;定义常量，16位模式下的栈顶初始值
+
+;定义一个实模式的数据段
+[section .data16]
+DATA16_SEGMENT:
+	MEM_ERR_MSG db "[FAILED] memory check error ..."
+	MEM_ERR_MSG_LEN equ $ - MEM_ERR_MSG
+
+Data16SegLen equ $ - DATA16_SEGMENT
+
 
 ;定义一个32位模式的数据段
 [section .dat]
@@ -46,9 +57,20 @@ DATA32_SEGMENT:
 Data32SegLen equ $ - DATA32_SEGMENT  ;数据段长度
 
 
-MEM_SIZE 		times 4 db 0   			;定义4字节内存，用于保存物理内存容量
-MEM_ADRS_NUM 	times 4 db 0   			;定义4字节内存，用于保存查到的ADRS结构的数量
-MEM_ADRS 		times 64 * 20 db 0		;定义64个ADRS结构体，每个结构体占20个字节
+[section .sysdat]
+[bits 32]
+SYSDATE32_SEGMENT:
+	MEM_SIZE 		times 4 db 0   			;定义4字节内存，用于保存物理内存容量
+	MEM_SIZE_OFFSET equ MEM_SIZE - $$
+	
+	MEM_ADRS_NUM 	times 4 db 0   			;定义4字节内存，用于保存查到的ADRS结构的数量
+	MEM_ADRS_NUM_OFFSET equ MEM_ADRS_NUM - $$
+	
+	MEM_ADRS 		times 64 * 20 db 0		;定义64个ADRS结构体，每个结构体占20个字节
+	MEM_ADRS_OFFSET equ MEM_ADRS - $$
+
+SysDate32SegLen equ $ - SYSDATE32_SEGMENT
+
 
 ;实模式的代码段定义
 [section .s16]
@@ -64,6 +86,10 @@ ENTRY_SEGMENT:
 	;call GetMemSize   ;打断点，查看内存 MEM_SIZE 处的大小(单位为字节)，即为物理内存大小，此处大小为0x2000000 / 1024 / 1024 = 32M,与bochsrc里的内存配置大小一致
 	call InitSysMenBuf ;打断点，查看MEM_ADRS_NUM、MEM_ADRS内存的地址值，MEM_ADRS每次查看1个ADRS结构体(20字节),地址查看方式为找到函数的入口地址，再在函数中找该两个变量的地址
 	
+	cmp eax, 0  ;判断内存获取结果
+	
+	jnz CODE16_MEM_ERR  ;不为0，出错则跳转
+	
 	;代码段初始化
 	mov esi, CODE32_SEGMENT
 	mov edi, CODE32_DESC	
@@ -77,6 +103,11 @@ ENTRY_SEGMENT:
 	;32位保护模式栈段初始化
 	mov esi, STACK32_SEGMENT
 	mov edi, STACK32_DESC
+	call InitDescItem
+	
+	;32位保护模式只读数据段初始化
+	mov esi, SYSDATE32_SEGMENT
+	mov edi, SYSDATE32_DESC
 	call InitDescItem
 	
 	; 初始化GdTPtr结构体值
@@ -105,7 +136,23 @@ ENTRY_SEGMENT:
 	;5-从16位模式跳转到32位模式
 	jmp dword Code32Selector : 0
 	
+CODE16_MEM_ERR:
+	
+	mov bp, MEM_ERR_MSG
+	mov cx, MEM_ERR_MSG_LEN
+	call Print
+	jmp $
 
+;实模式下的打印函数
+;es:bp -> 要打印的字符串
+;cx  -> 字符串长度
+Print:
+	mov dx, 0
+	mov ax, 0x1301
+	mov bx, 0x0007
+	int 0x10
+	ret
+	
 ;定义段描述符初始化函数
 ; esi -> 代码段标签
 ; edi -> 段描述符标签	
@@ -125,7 +172,7 @@ InitDescItem:
 	pop eax
 	ret
 	
-;获取物理内存函数
+;通过BIOS中断(int 0x15)基础功能(eax = 0xE801获取)，获取物理内存容量
 GetMemSize:
 	push eax
 	push ebx
@@ -167,7 +214,7 @@ getOK:
 	
 	ret
 	
-;通过ADRS结构体获取物理内存容量
+;通过BIOS中断(int 0x15)高级功能(eax = 0xE820获取)，ADRS结构体获取物理内存容量
 ; return 
 ; eax -> 0 succeed    1  failed
 InitSysMenBuf:
@@ -175,6 +222,8 @@ InitSysMenBuf:
 	push ebx
 	push ecx
 	push edx
+	
+	call GetMemSize   ;先通过基础版方式获取内存，值保存在MEM_SIZE内存处
 	
 	mov edi, MEM_ADRS   ;结构体赋值到edi寄存器
 	mov ebx, 0	;ebx 寄存器必须设置为0
@@ -208,11 +257,11 @@ next:
 	cmp ebx, 0   ;判断 ebx 是否为0
 	jne doLoop  ;不为0则继续循环， 为零则循环结束，接着往下走
 	
-	mov eax, 0
+	mov eax, 0   ;设置成功返回值
 	jmp memok
 	
 memerr:
-	mov eax, 1
+	mov eax, 1   ;设置失败返回值
 	mov dword [MEM_SIZE], 0
 	mov dword [MEM_ADRS_NUM], 0
 	mov dword [MEM_ADRS], 0
