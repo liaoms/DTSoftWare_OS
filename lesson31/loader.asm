@@ -21,7 +21,7 @@ GdtPtr:	;全局段描述符地址
         dw GdtLen - 1
         dd 0
 		
-; GDT Selector(定义选择子)
+; GDT Selector(定义选择子)m
 
 Code32Selector    		equ (0x0001 << 3) + SA_TIG + SA_RPL0  ;第一个代码段的选择子下标为1 (0x001),
 VideoSelector     		equ (0x0002 << 3) + SA_TIG + SA_RPL0  ;显示段的选择子下标为2 (0x002)
@@ -187,6 +187,20 @@ doLoop:
 	int 0x15   ;触发中断， 将一个ADRS结构体内容存到edi所指向的MEM_ADRS地址中
 	
 	jc memerr   ;判断CF位是否为1，为1表示出错，跳转到memerr
+	
+	;ADRS结构体中type值为1表示内存可用，2表示不可用，3表示预留(视为可用)
+	cmp dword [edi + 16], 1   ;比较获取到当前的type值是否为1
+	jne next
+	
+	mov eax, dword [edi]     ;计算type为1的内存值   32位机ADRS计算内存只用到(BaseAddrLow(偏移地址0字节处) + LengthLow(偏移地址8字节处))
+	add eax, dword [edi + 8]
+	
+	cmp dword [MEM_SIZE], eax	
+	jnb next   ;if(MEM_SIZE > eax) -> jmp next
+	
+	mov dword [MEM_SIZE], eax   ;else MEM_SIZE = eax  ,最终MEM_SIZE 保存的是type=1下，的最大可用物理内存值
+	
+next:
 	
 	add edi, 20   ;正常提取一个ADRS结构体后，edi往后偏移20字节，准备保存下次循环提取的ADRS结构体(一个ADRS占用20字节)
 	inc dword [MEM_ADRS_NUM]   ;ADRS结构体计数自增1
