@@ -20,7 +20,7 @@ GdtLen  equ $ - GDT_ENTRY	;全局段的长度
 GdtPtr:	;全局段描述符地址
         dw GdtLen - 1
         dd 0
-		
+
 ; GDT Selector(定义选择子)m
 
 Code32Selector    		equ (0x0001 << 3) + SA_TIG + SA_RPL0  ;第一个代码段的选择子下标为1 (0x001),
@@ -28,6 +28,33 @@ VideoSelector     		equ (0x0002 << 3) + SA_TIG + SA_RPL0  ;显示段的选择子
 Data32Selector    		equ (0x0003 << 3) + SA_TIG + SA_RPL0  ;数据段的选择子下标为3 (0x003)
 Stack32Selector   		equ (0x0004 << 3) + SA_TIG + SA_RPL0  ;32为保护模式下栈段的选择子下标为4 (0x004)
 ; end of [section .gdt]
+
+;定义中断描述符表
+[section .idt]
+align 32
+[bits 32]
+IDT_ENTRY:
+;x85有256个中断描述符，需要补全
+;						选择子               偏移值        参数          属性
+%rep 128
+			Gate	Code32Selector,		DefaultHander, 		0,		DA_386IGate    ;DA_386IGate表示中断门
+%endrep
+	
+Int0x80 :	Gate   Code32Selector,		Int0x80Handler,		0,		DA_386IGate		;0x80号中断十进制为128，所以要排在中断描述符表的128位，前边0~127,供占128个描述符，所以定义128个默认描述符	
+
+%rep 127
+			Gate	Code32Selector,		DefaultHander, 		0,		DA_386IGate    ;DA_386IGate表示中断门   最后补全127和默认描述符
+%endrep
+
+IdtLen equ $ - IDT_ENTRY
+
+IdtPtr:	;中断描述符地址
+        dw IdtLen - 1
+        dd 0
+
+; end of [section .idt]
+
+
 
 TopOfStack16 equ 0x7c00   ;定义常量，16位模式下的栈顶初始值
 
@@ -48,9 +75,9 @@ DATA32_SEGMENT:
 	DTOS_LEN equ $ - DTOS		;当前地址 - 字符串起始地址 
 	DTOS_OFFSET equ DTOS - $$ ;字符串"D.T.OS!" 在数据段的偏移地址(字符串起始地址 - 段起始地址)
 	
-	HELLO    db "HELLO WORD!", 0  ;以0结尾的字符串 "D.T.OS!"
-	HELLO_LEN equ $ - HELLO		;当前地址 - 字符串起始地址 
-	HELLO_OFFSET equ HELLO - $$ ;字符串"D.T.OS!" 在数据段的偏移地址(字符串起始地址 - 段起始地址)
+	INT_80H    db "int 0x80", 0  ;以0结尾的字符串 "D.T.OS!"
+	INT_80H_LEN equ $ - INT_80H		;当前地址 - 字符串起始地址 
+	INT_80H_OFFSET equ INT_80H - $$ ;字符串"D.T.OS!" 在数据段的偏移地址(字符串起始地址 - 段起始地址)
 
 Data32SegLen equ $ - DATA32_SEGMENT  ;数据段长度
 
@@ -89,11 +116,20 @@ ENTRY_SEGMENT:
 	add eax, GDT_ENTRY
 	mov dword [GdtPtr + 2], eax
 	
+	; 初始化IdTPtr结构体值
+	mov eax, 0
+	mov ax, ds
+	shl eax, 4
+	add eax, IDT_ENTRY
+	mov dword [IdtPtr + 2], eax
+	
 	;1-加载全局段描述符表
 	lgdt [GdtPtr]
 	
 	;2-关中断
 	cli
+	
+	lidt [IdtPtr]   ;加载中断描述符表
 	
 	;3-打开 A20地址线
 	in al, 0x92
@@ -165,7 +201,15 @@ CODE32_SEGMENT:
 	mov dh, 12 ;打印位置 12行33列
 	mov dl, 33
 	
-	call PrintString 
+	call PrintString
+
+	;打印配置
+	mov ebp, INT_80H_OFFSET  ;
+	mov bx, 0x0c 	;打印属性黑底红字
+	mov dh, 13 ;打印位置 12行33列
+	mov dl, 32
+	
+	int 0x80   ;触发保护模式下子定义的0x80号中断
 	
 	jmp $   
 
@@ -242,6 +286,22 @@ ReadIMR:
 	in ax, dx
 	call Delay
 	ret
+	
+	
+;默认中断服务程序
+DefaultHanderFun:
+
+	iret
+
+DefaultHander equ DefaultHanderFun - $$   ;保护模式下，需要计算偏移地址
+	
+;0x80中断服务程序
+Int0x80HandlerFun:
+
+	call PrintString
+	iret
+
+Int0x80Handler equ Int0x80HandlerFun - $$  ;保护模式下，需要计算偏移地址
 	
 ;打印函数
 PrintString:	
