@@ -36,11 +36,17 @@ align 32
 IDT_ENTRY:
 ;x85有256个中断描述符，需要补全
 ;						选择子               偏移值        参数          属性
-%rep 128
+%rep 32
 			Gate	Code32Selector,		DefaultHander, 		0,		DA_386IGate    ;DA_386IGate表示中断门
 %endrep
 	
-Int0x80 :	Gate   Code32Selector,		Int0x80Handler,		0,		DA_386IGate		;0x80号中断十进制为128，所以要排在中断描述符表的128位，前边0~127,供占128个描述符，所以定义128个默认描述符	
+Int0x20 :	Gate   Code32Selector,		TimerHandler,		0,		DA_386IGate		;0x20号中断十进制为32，所以要排在中断描述符表的128位，前边0~32,供占128个描述符，所以定义32个默认描述符	
+	
+%rep 95
+			Gate	Code32Selector,		DefaultHander, 		0,		DA_386IGate    ;DA_386IGate表示中断门
+%endrep
+	
+Int0x80 :	Gate   Code32Selector,		Int0x80Handler,		0,		DA_386IGate		;0x80号中断十进制为128，所以要排在中断描述符表的128位，前边0~127,供占128个描述符，所以定义128个描述符	
 
 %rep 127
 			Gate	Code32Selector,		DefaultHander, 		0,		DA_386IGate    ;DA_386IGate表示中断门   最后补全127和默认描述符
@@ -131,6 +137,8 @@ ENTRY_SEGMENT:
 	
 	lidt [IdtPtr]   ;加载中断描述符表
 	
+	
+	
 	;3-打开 A20地址线
 	in al, 0x92
 	or al, 00000010b
@@ -211,9 +219,32 @@ CODE32_SEGMENT:
 	
 	int 0x80   ;触发保护模式下子定义的0x80号中断
 	
+	sti  ;打开总开关，以便响应外部中断
+	call EnableTimer   ;打开时钟中断 
+	
 	jmp $   
 
+;触发时钟中断
+EnableTimer:
+	push ax
+	push dx
+	
+	mov ah, 0x0c
+	mov al, '0'
+	mov [gs:((80*14 + 36) * 2)], ax   ;显存放入一个字符
+	
+	mov dx, MASTER_IMR_PORT
+	call ReadIMR  ;读主片中断屏蔽寄存器，结果在ax寄存器中
 
+	and ax, 0xFE    ;将最低位置0(开启外部时钟中断开关)，即外部时钟所在应交IR0
+	
+	call WriteIMR   ;将ax写会dx表示的中断屏蔽寄存器
+ 	
+	pop dx
+	pop ax
+	
+	ret
+	
 ;延时函数
 Delay:
 	%rep 5
@@ -287,6 +318,17 @@ ReadIMR:
 	call Delay
 	ret
 	
+;手工结束中断控制字
+; dx -> 8259A的端口
+WriteEOI:
+	push ax
+	
+	mov al, 0x20
+	out dx, al
+	call Delay
+	
+	pop ax
+	ret
 	
 ;默认中断服务程序
 DefaultHanderFun:
@@ -302,6 +344,35 @@ Int0x80HandlerFun:
 	iret
 
 Int0x80Handler equ Int0x80HandlerFun - $$  ;保护模式下，需要计算偏移地址
+
+;外部时钟中断服务程序
+TimerHandlerFun:
+	push ax
+	push dx
+	
+	mov ax, [gs:((80*14 + 36) * 2)]  ;提取现存中，14行36列
+	
+	cmp al, '9'
+	je throate
+	inc al
+	
+	jmp thsow
+
+throate:
+	mov al, '0'
+	
+thsow:
+	mov [gs:((80*14 + 36) * 2)], al  ;把值放回显存
+
+	mov dx, MASTER_OCW2_PORT
+	call WriteEOI
+
+	pop dx
+	pop ax
+		
+	iret
+
+TimerHandler equ TimerHandlerFun - $$  ;保护模式下，需要计算偏移地址
 	
 ;打印函数
 PrintString:	
