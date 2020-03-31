@@ -20,6 +20,8 @@ CODE32_DESC  		:   Descriptor        0,    			Code32SegLen -1,       	DA_C + DA_
 VIDEO_DESC   		:   Descriptor     0xB8000, 			    0x07FFF,           	DA_DRWA + DA_32 + DA_DPL0	;定义一个显示段范围0xB8000~0xBFFFF，段界限为偏移地址的最大值(0xBFFFF-0xB8000)属性为 已访问的可读写数据段 + 保护模式下32位段
 CODE32_FLAT_DESC  	:   Descriptor        0,    				0xFFFFF,       		DA_C + DA_32 + DA_DPL0		;平坦内存模型
 DATA32_FLAT_DESC  	:   Descriptor        0,    			    0xFFFFF,      		DA_DRW + DA_32 + DA_DPL0	;定义数据段描述符  
+TASK_LDT_DESC     	:   Descriptor        0,    			      0,      		    0	;定义数据段描述符  
+TASK_TSS_DESC  	    :   Descriptor        0,    			      0,      		    0	;定义数据段描述符  
 
 ; GDT end
 
@@ -127,12 +129,39 @@ InitDescItem:
 ; 加载全局段描述符入口地址到共享内存地址
 ;
 StoreGlobal:
+	mov dword [RunTaskEntry], RunTask
 	mov eax, [GdtPtr + 2]
 	mov dword [GdtEntry], eax
 	
 	mov dword [GdtSize], GdtLen / 8
 	
 	ret
+	
+;
+;
+;
+[section .gfunc]
+[bits 32]
+;
+;参数 -> Task* pt
+RunTask:
+	push ebp
+	mov ebp, esp
+	mov esp, [ebp + 8] ;esp指向Task* pt 结构体的第一个成员 gs
+	
+	lldt word [esp + 200]
+	ltr word [esp + 202]
+	
+	pop gs
+	pop fs
+	pop es
+	pop ds
+	
+	popad
+	
+	add esp , 4  ;此刻esp指向任务入口代码的前一个元素，所以需要+4个字节，指向代码入口地址
+	
+	iret  ;启动任务
 	
 ;定义32位代码段
 [section .s32]	
