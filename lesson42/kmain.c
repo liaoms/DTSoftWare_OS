@@ -2,6 +2,10 @@
 #include "screen.h"
 #include "global.h"
 
+void (* const InitInterrupt)() = NULL;
+void (* const EnableTimer)() = NULL;
+void (* const SendEOI)(uint port) = NULL;
+
 //保存进程的结构体信息
 Task p = {0};
 
@@ -42,11 +46,35 @@ void TaskA()
     }
 }
 
+//中断服务程序
+void TimerHandler()
+{
+	static int i = 0;
+	
+	i = (i+1) % 10;
+	
+	if(0 == i)
+	{
+		static int j = 0;
+		
+		SetPrintPos(0, 13);
+		PrintString("TimerHandler: ");
+		SetPrintPos(14, 13);
+		PrintIntDec(j++);
+		PrintChar('\n');	
+	}
+	
+	SendEOI(MASTER_EOI_PORT);   //时钟中断需要手工结束中断控制字
+	
+	asm volatile("leave\n""iret\n");  //中断程序需要以iret结尾
+}
+
 void KMain()
 {	
 	uint base 	= 0;
 	uint limit 	= 0;
 	uint attr 	= 0;
+	uint temp = 0;
 	
 	int i = 0;
 	
@@ -55,20 +83,16 @@ void KMain()
 	PrintString("Gdt Entry:");
 	PrintHex((int)gGdtInfo.entry);
 	PrintChar('\n');
+	PrintString("Gdt size:");
+	PrintIntDec((int)gGdtInfo.size);
+	PrintChar('\n');
 	
-	for(i=0; i<gGdtInfo.size; i++)
-	{
-		GetDescValue(gGdtInfo.entry + i, &base, &limit, &attr);
-	
-		PrintHex(base);
-		PrintString("    ");
-		
-		PrintHex(limit);
-		PrintString("    ");
-		
-		PrintHex(attr);
-		PrintChar('\n');
-	}
+	PrintString("Idt Entry:");
+	PrintHex((int)gIdtInfo.entry);
+	PrintChar('\n');
+	PrintString("Idt size:");
+	PrintIntDec((int)gIdtInfo.size);
+	PrintChar('\n');
 	
 	PrintString("RunTask: ");
     PrintHex((uint)RunTask);
@@ -84,10 +108,10 @@ void KMain()
     
     p.rv.esp = (uint)p.stack + sizeof(p.stack);   //进程使用的栈段
     p.rv.eip = (uint)TaskA;		//进程入口地址
-    p.rv.eflags = 0x3002;		//标志，允许IO访问，禁止外部中断
+    p.rv.eflags = 0x3202;		//标志，允许IO访问，允许中断
     
     p.tss.ss0 = GDT_DATA32_FLAT_SELECTOR;   //设置tss结构体，
-    p.tss.esp0 = 0;
+    p.tss.esp0 = 0x9000;     //进入中断服务程序时，3特权级转入0特权级，需要切换到0特权级栈，此处设置一个有效值
     p.tss.iomb = sizeof(p.tss);
     
     SetDescValue(p.ldt + LDT_VIDEO_INDEX,  0xB8000, 0x07FFF, DA_DRWA + DA_32 + DA_DPL3); 	//注册局部任务段ldt显存段描述符
@@ -99,6 +123,12 @@ void KMain()
     
     SetDescValue(&gGdtInfo.entry[GDT_TASK_LDT_INDEX], (uint)&p.ldt, sizeof(p.ldt)-1, DA_LDT + DA_DPL0);  	//全局段中注册任务的ldt
     SetDescValue(&gGdtInfo.entry[GDT_TASK_TSS_INDEX], (uint)&p.tss, sizeof(p.tss)-1, DA_386TSS + DA_DPL0); 	//全局段中注册任务的tss
+	
+	SetIntHandler(gIdtInfo.entry + 0x20, (uint)TimerHandler);  //设置时钟中断入口函数为TimerHandler
+	
+	
+	InitInterrupt();  	//初始化外部中断
+	EnableTimer();		//开启时钟中断
     
     PrintString("Stack Bottom: ");
     PrintHex((uint)p.stack);

@@ -9,12 +9,14 @@ BaseOfKernel equ 0xB000
 BaseOfSharedMemory  equ  0xA000
 
 ;共享变量地址
-GdtEntry		equ 	BaseOfSharedMemory
-GdtSize			equ		BaseOfSharedMemory + 4
-LdtEntry		equ 	BaseOfSharedMemory + 8
-LdtSize			equ 	BaseOfSharedMemory + 12
-RunTaskEntry	equ 	BaseOfSharedMemory + 16
-
+GdtEntry			equ 	BaseOfSharedMemory
+GdtSize				equ		BaseOfSharedMemory + 4
+IdtEntry			equ 	BaseOfSharedMemory + 8
+IdtSize				equ 	BaseOfSharedMemory + 12
+RunTaskEntry		equ 	BaseOfSharedMemory + 16
+InitInterruptEntry	equ 	BaseOfSharedMemory + 20
+EnableTimertEntry	equ 	BaseOfSharedMemory + 24
+SendEOIEntry		equ 	BaseOfSharedMemory + 28
 
 ; PIC-8259A Ports
 MASTER_ICW1_PORT                        equ     0x20

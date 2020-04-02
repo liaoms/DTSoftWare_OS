@@ -20,6 +20,20 @@ typedef struct
 	const int size;
 } GdtInfo;
 
+typedef struct 
+{
+	ushort offset1;    //门结构的偏移地址1
+	ushort selector;   //门结构的选择子
+	byte dcount;	   //参数
+	byte attr;         //属性
+	ushort offset2;    //偏移地址2
+} Gate;
+
+typedef struct
+{
+	Gate* const entry;
+	const int size;
+}IdtInfo;
 
 typedef struct {
     uint gs;
@@ -66,5 +80,7 @@ typedef struct
 
 int SetDescValue(Descriptor* pDesc, uint base, uint limit, ushort attr);
 int GetDescValue(Descriptor* pDesc, uint* pBase, uint* pLimit, ushort* pAttr);
+int SetIntHandler(Gate* pGate, uint ifunc);
+int GetIntHandler(Gate* pGate, uint *pIfunc);
 
 #endif 

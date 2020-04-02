@@ -40,6 +40,25 @@ Data32FlatSelector    	equ (0x0004 << 3) + SA_TIG + SA_RPL0
 
 ; end of [section .gdt]
 
+;定义中断描述符表
+[section .idt]
+align 32
+[bits 32]
+IDT_ENTRY:
+;x85有256个中断描述符，需要补全
+;						选择子               偏移值        参数          属性
+%rep 256
+			Gate	Code32Selector,		DefaultHander, 		0,		DA_386IGate + DA_DPL0    ;DA_386IGate表示中断门
+%endrep
+
+IdtLen equ $ - IDT_ENTRY
+
+IdtPtr:	;中断描述符地址
+        dw IdtLen - 1
+        dd 0
+
+; end of [section .idt]
+
 
 ;实模式的代码段定义
 [section .s16]
@@ -63,6 +82,13 @@ BLMain:
 	add eax, GDT_ENTRY
 	mov dword [GdtPtr + 2], eax
 	
+	; 初始化IdTPtr结构体值
+	mov eax, 0
+	mov ax, ds
+	shl eax, 4
+	add eax, IDT_ENTRY
+	mov dword [IdtPtr + 2], eax
+	
 	call LoadTarget
 	
 	cmp dx, 0
@@ -75,6 +101,8 @@ BLMain:
 	
 	;2-关中断
 	cli
+	
+	lidt [IdtPtr]   ;加载中断描述符表
 	
 	;设置IOPL值为3，允许IO端口被访问
 	pushf
@@ -129,14 +157,116 @@ InitDescItem:
 ; 加载全局段描述符入口地址到共享内存地址
 ;
 StoreGlobal:
+	
+	;内核函数入口填入共享内存地址
 	mov dword [RunTaskEntry], RunTask
-	mov eax, [GdtPtr + 2]
+	mov dword [InitInterruptEntry], InitInterrupt  
+	mov dword [EnableTimertEntry], EnableTimer
+	mov dword [SendEOIEntry], SendEOI
+	
+	;全局段描述符表放到共享内存
+	mov eax, [GdtPtr + 2]    
 	mov dword [GdtEntry], eax
 	
 	mov dword [GdtSize], GdtLen / 8
 	
+	;中断描述符表放到共享内存
+	mov eax, [IdtPtr + 2]
+	mov dword [IdtEntry], eax
+	
+	mov dword [IdtSize], IdtLen / 8
+	
+	ret
+
+;
+; 与中断相关的函数定义
+;
+[section .sfunc]
+[bits 32]
+;延时函数
+Delay:
+	%rep 5
+	nop
+	%endrep
+	ret
+
+;初始化8259A	
+Init8259A:
+	push ax
+	
+	;master 主片
+	;ICW1 0x20端口
+	mov al, 00010001B
+	out MASTER_ICW1_PORT, al   ;0x20端口,边沿触发中断， 多片级联
+	call Delay
+	
+	;ICW2  0x21端口
+	mov al, 0x20   ;
+	out MASTER_ICW2_PORT, al ;0x21端口,IR0中断向量为0x20
+	call Delay
+	
+	;ICW3  0x21端口
+	mov al, 00000100B
+	out MASTER_ICW3_PORT, al ;0x21端口,从片级联值IR2引脚
+	call Delay
+	
+	;ICW14   0x21端口
+	mov al, 00010001B
+	out MASTER_ICW4_PORT, al  ;0x21端口,特殊全嵌套，非缓冲数据连接，手动结束中断
+	call Delay
+
+	;Slave  从片
+	;ICW1
+	mov al, 00010001B
+	out SLAVE_ICW1_PORT, al ;0xA0端口，边沿触发中断，多篇级联
+	call Delay
+	
+	;ICW2
+	mov al, 0x28
+	out SLAVE_ICW2_PORT, al ;0xA1端口，IR0中断向量为0x28
+	call Delay
+	
+	;ICW3
+	mov al, 00000010B
+	out SLAVE_ICW3_PORT, al ;0xA1端口，级联值至主片IR2引脚
+	call Delay
+	
+	;ICW4
+	mov al, 00000001B
+	out SLAVE_ICW4_PORT, al ;0xA1端口，普通全嵌套，非缓冲数据连接，手动结束中断
+	call Delay
+	
+	pop ax
+	
+	ret
+
+;写中断屏蔽寄存器函数
+; al -> 要写的值
+; dx -> 8259A的端口
+WriteIMR:
+	out dx, al
+	call Delay
+	ret
+
+;读中断屏蔽寄存器函数
+; al -> 返回值
+; dx -> 8259A的端口
+ReadIMR:
+	in ax, dx
+	call Delay
 	ret
 	
+;手工结束中断控制字
+; dx -> 8259A的端口
+WriteEOI:
+	push ax
+	
+	mov al, 0x20
+	out dx, al
+	call Delay
+	
+	pop ax
+	ret	
 ;
 ;
 ;
@@ -163,6 +293,67 @@ RunTask:
 	
 	iret  ;启动任务
 	
+;
+; 初始化外部中断(8259A)
+InitInterrupt:
+	push ebp
+	mov ebp, esp
+	
+	push ax
+	push dx
+	
+	call Init8259A  ;初始化8259A
+ 	
+	sti   ;打开总开关
+	
+	mov ax, 0xFF  ;初始化完成后屏蔽所有外部中断
+	mov dx, MASTER_IMR_PORT
+	call WriteIMR
+	
+	pop dx
+	pop ax
+	
+	leave
+	ret
+	
+;启用时钟中断函数
+EnableTimer:
+	push ebp
+	mov ebp, esp
+	
+	push ax
+	push dx
+	
+	mov dx, MASTER_IMR_PORT
+	call ReadIMR  ;读主片中断屏蔽寄存器，结果在ax寄存器中
+
+	and ax, 0xFE    ;将最低位置0(开启外部时钟中断开关)，即外部时钟所在应交IR0
+	
+	call WriteIMR   ;将ax写会dx表示的中断屏蔽寄存器
+ 	
+	pop dx
+	pop ax
+	
+	leave
+	ret
+	
+;手工结束中断控制字 void SendEOI(uint port)
+; port -> 8259A的端口
+SendEOI:
+	push ebp
+	mov ebp, esp
+
+	mov dx, [ebp + 8] ;获取参数port的值
+	
+	
+	mov al, 0x20
+	out dx, al
+	
+	pop ax
+	
+	leave
+	ret
+	
 ;定义32位代码段
 [section .s32]	
 [bits 32]
@@ -181,6 +372,13 @@ CODE32_SEGMENT:
 	mov esp, BaseOfLoader
 
 	jmp dword Code32FlatSelector : BaseOfKernel   ;跳到内核入口地址0xB000处执行 
+	
+;默认中断服务程序
+DefaultHanderFun:
+
+	iret
+
+DefaultHander equ DefaultHanderFun - $$   ;保护模式下，需要计算偏移地址
 
 Code32SegLen    equ $ - CODE32_SEGMENT    ;定义32位代码段段界限
 

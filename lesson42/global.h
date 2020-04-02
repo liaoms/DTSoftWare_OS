@@ -5,6 +5,7 @@
  #include "const.h"
  
  extern GdtInfo gGdtInfo;
+ extern IdtInfo gIdtInfo;
  extern void (* const RunTask)(Task* pt);
  
  
