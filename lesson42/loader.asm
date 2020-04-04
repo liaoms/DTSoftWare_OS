@@ -349,7 +349,7 @@ SendEOI:
 	mov al, 0x20
 	out dx, al
 	
-	pop ax
+	call Delay
 	
 	leave
 	ret

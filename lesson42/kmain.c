@@ -6,6 +6,8 @@ void (* const InitInterrupt)() = NULL;
 void (* const EnableTimer)() = NULL;
 void (* const SendEOI)(uint port) = NULL;
 
+Task* gCTaskAddr = NULL;    //定义一个全局任务结构体指针，供加载内核的Kernel.asm使用
+
 //保存进程的结构体信息
 Task p = {0};
 
@@ -46,6 +48,8 @@ void TaskA()
     }
 }
 
+void TimerHandlerEntry();
+
 //中断服务程序
 void TimerHandler()
 {
@@ -66,7 +70,7 @@ void TimerHandler()
 	
 	SendEOI(MASTER_EOI_PORT);   //时钟中断需要手工结束中断控制字
 	
-	asm volatile("leave\n""iret\n");  //中断程序需要以iret结尾
+	//asm volatile("leave\n""iret\n");  //中断程序需要以iret结尾
 }
 
 void KMain()
@@ -111,7 +115,7 @@ void KMain()
     p.rv.eflags = 0x3202;		//标志，允许IO访问，允许中断
     
     p.tss.ss0 = GDT_DATA32_FLAT_SELECTOR;   //设置tss结构体，
-    p.tss.esp0 = 0x9000;     //进入中断服务程序时，3特权级转入0特权级，需要切换到0特权级栈，此处设置一个有效值
+    p.tss.esp0 = (uint)&p.rv + sizeof(p.rv);     //使用任务结构体的RegValue成员作为内核初始的内核栈，设置任务的esp0指向任务结构的寄存器结构体，以便进入中断后，寄存器上下文存入任务对应的结构体处，便于恢复上下文执行
     p.tss.iomb = sizeof(p.tss);
     
     SetDescValue(p.ldt + LDT_VIDEO_INDEX,  0xB8000, 0x07FFF, DA_DRWA + DA_32 + DA_DPL3); 	//注册局部任务段ldt显存段描述符
@@ -124,17 +128,13 @@ void KMain()
     SetDescValue(&gGdtInfo.entry[GDT_TASK_LDT_INDEX], (uint)&p.ldt, sizeof(p.ldt)-1, DA_LDT + DA_DPL0);  	//全局段中注册任务的ldt
     SetDescValue(&gGdtInfo.entry[GDT_TASK_TSS_INDEX], (uint)&p.tss, sizeof(p.tss)-1, DA_386TSS + DA_DPL0); 	//全局段中注册任务的tss
 	
-	SetIntHandler(gIdtInfo.entry + 0x20, (uint)TimerHandler);  //设置时钟中断入口函数为TimerHandler
-	
+	SetIntHandler(gIdtInfo.entry + 0x20, (uint)TimerHandlerEntry);  //设置时钟中断入口函数为TimerHandlerEntry
 	
 	InitInterrupt();  	//初始化外部中断
 	EnableTimer();		//开启时钟中断
     
-    PrintString("Stack Bottom: ");
-    PrintHex((uint)p.stack);
-    PrintString("    Stack Top: ");
-    PrintHex((uint)p.stack + sizeof(p.stack));
-    
-    RunTask(&p);   //执行进程，执行时刽调用内核函数RunTask，将参数P传入，寄存器设置为该任务TaskA的信息，从而进入任务入口TaskA执行
+    gCTaskAddr = &p;
+	
+    RunTask(gCTaskAddr);   //执行进程，执行时刽调用内核函数RunTask，将参数P传入，寄存器设置为该任务TaskA的信息，从而进入任务入口TaskA执行
 	
 }
