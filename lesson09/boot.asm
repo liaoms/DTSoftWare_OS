@@ -135,7 +135,7 @@ last:
 ;	dx -> fat[index]
 FatVec:
 	mov ax, cx
-	mov al, 2
+	mov cl, 2
 	div cl	;fat表下标/2
 	
 	push ax
